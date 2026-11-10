@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>⚡ TC Analyzer — Time Complexity Analyzer</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Animated background particles -->
+    <canvas id="particles"></canvas>
+
+    <!-- Header -->
+    <header class="header">
+        <div class="header-left">
+            <div class="logo">
+                <span class="logo-icon">⚡</span>
+                <span class="logo-text">TC<span class="logo-accent">Analyzer</span></span>
+            </div>
+        </div>
+        <nav class="header-nav">
+            <button class="nav-btn active" data-tab="analyzer">Analyzer</button>
+            <button class="nav-btn" data-tab="examples">Examples</button>
+            <button class="nav-btn" data-tab="learn">Learn Big O</button>
+        </nav>
+        <div class="header-right">
+            <button class="theme-toggle" id="themeToggle" title="Toggle theme">
+                <span class="theme-icon">🌙</span>
+            </button>
+            <div class="query-counter">
+                <span id="queryCount">0</span> / ∞ queries
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+
+        <!-- ====== ANALYZER TAB ====== -->
+        <section class="tab-content active" id="tab-analyzer">
+            <div class="hero">
+                <h1 class="hero-title">
+                    Analyze Your Code's
+                    <span class="gradient-text">Time Complexity</span>
+                </h1>
+                <p class="hero-subtitle">
+                    Paste any code snippet — get instant Big O analysis with detailed explanations.
+                    <br>Supports Python, JavaScript, Java, C++, Go, and pseudocode.
+                </p>
+            </div>
+
+            <div class="analyzer-grid">
+                <!-- Code Input Panel -->
+                <div class="panel code-panel">
+                    <div class="panel-header">
+                        <div class="panel-title">
+                            <span class="panel-icon">📝</span>
+                            Code Input
+                        </div>
+                        <div class="panel-actions">
+                            <select id="languageSelect" class="language-select">
+                                <option value="auto">Auto Detect</option>
+                                <option value="python">Python</option>
+                                <option value="javascript">JavaScript</option>
+                                <option value="java">Java</option>
+                                <option value="cpp">C++</option>
+                                <option value="c">C</option>
+                                <option value="go">Go</option>
+                                <option value="typescript">TypeScript</option>
+                                <option value="rust">Rust</option>
+                                <option value="pseudo">Pseudocode</option>
+                            </select>
+                            <button class="icon-btn" id="clearBtn" title="Clear code">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                            </button>
+                            <button class="icon-btn" id="copyBtn" title="Copy code">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="code-editor-wrapper">
+                        <div class="line-numbers" id="lineNumbers">1</div>
+                        <textarea 
+                            id="codeInput" 
+                            class="code-editor" 
+                            placeholder="Paste your code here...
+
+Example:
+vector<int> twoSum(vector<int>& nums, int target) {
+    unordered_map<int, int> seen;
+    for (int i = 0; i < nums.size(); i++) {
+        int comp = target - nums[i];
+        if (seen.count(comp))
+            return {seen[comp], i};
+        seen[nums[i]] = i;
+    }
+    return {};
+}"
+                            spellcheck="false"
+                        ></textarea>
+                    </div>
+                    <div class="panel-footer">
+                        <div class="char-count">
+                            <span id="charCount">0</span> characters · <span id="lineCount">0</span> lines
+                        </div>
+                        <button class="analyze-btn" id="analyzeBtn">
+                            <span class="btn-content">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                                Analyze Complexity
+                            </span>
+                            <span class="btn-loading" style="display:none;">
+                                <div class="spinner"></div>
+                                Analyzing...
+                            </span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Results Panel -->
+                <div class="panel results-panel">
+                    <div class="panel-header">
+                        <div class="panel-title">
+                            <span class="panel-icon">📊</span>
+                            Analysis Results
+                        </div>
+                        <div class="panel-actions">
+                            <button class="icon-btn" id="copyResultBtn" title="Copy results" style="display:none;">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="results-body" id="resultsBody">
+                        <div class="empty-state">
+                            <div class="empty-icon">🔍</div>
+                            <h3>No Analysis Yet</h3>
+                            <p>Paste your code on the left and click <strong>"Analyze Complexity"</strong> to get started.</p>
+                            <div class="empty-features">
+                                <div class="feature-chip">⏱ Time Complexity</div>
+                                <div class="feature-chip">💾 Space Complexity</div>
+                                <div class="feature-chip">📖 Explanation</div>
+                                <div class="feature-chip">💡 Optimization Tips</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- History Section -->
+            <div class="history-section" id="historySection" style="display:none;">
+                <div class="section-header">
+                    <h2><span class="section-icon">🕐</span> Analysis History</h2>
+                    <button class="text-btn" id="clearHistoryBtn">Clear All</button>
+                </div>
+                <div class="history-grid" id="historyGrid"></div>
+            </div>
+        </section>
+
+        <!-- ====== EXAMPLES TAB ====== -->
+        <section class="tab-content" id="tab-examples">
+            <div class="section-header centered">
+                <h2>📚 Pre-loaded Algorithm Examples</h2>
+                <p>Click any example to load it into the analyzer</p>
+            </div>
+            <div class="examples-grid" id="examplesGrid"></div>
+        </section>
+
+        <!-- ====== LEARN TAB ====== -->
+        <section class="tab-content" id="tab-learn">
+            <div class="section-header centered">
+                <h2>🎓 Understanding Big O Notation</h2>
+                <p>A visual guide to algorithmic complexity</p>
+            </div>
+            <div class="complexity-chart-container">
+                <canvas id="complexityChart"></canvas>
+            </div>
+            <div class="learn-grid" id="learnGrid"></div>
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <p>⚡ TC Analyzer — Built for developers, by developers. All analysis runs locally in your browser.</p>
+    </footer>
+
+    <!-- Toast Notification -->
+    <div class="toast" id="toast"></div>
+
+    <script src="analyzer.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
