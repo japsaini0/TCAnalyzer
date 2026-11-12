@@ -1,12 +1,12 @@
 /**
- * TC Analyzer — Core Analysis Engine (v2)
+ * TC Analyzer — Core Analysis Engine (v3)
  *
  * Multi-pass static analysis that models loop iteration counts,
  * recursion branching / Master-Theorem application, library-call costs,
  * and space usage. Runs entirely in the browser — zero dependencies.
  *
  * Public API: const result = new ComplexityAnalyzer().analyze(code, lang?)
- * Result shape is identical to v1 so app.js requires no changes.
+ * Result shape is identical so app.js requires no changes.
  */
 
 class ComplexityAnalyzer {
@@ -20,6 +20,12 @@ class ComplexityAnalyzer {
 
     analyze(code, language = 'auto') {
         if (!code || !code.trim()) return { error: 'No code provided' };
+
+        if (this._isPlainText(code)) {
+            return {
+                error: 'Input appears to be plain text or a description rather than code. Please paste a programming code snippet (e.g., C++, Python, Java, JavaScript).'
+            };
+        }
 
         const detectedLang = language === 'auto' ? this._detectLanguage(code) : language;
         const isPython = detectedLang === 'python';
@@ -57,6 +63,40 @@ class ComplexityAnalyzer {
             },
             timestamp: new Date().toISOString(),
         };
+    }
+
+    /* ==================================================================
+       PLAIN TEXT / NON-CODE DETECTION
+       ================================================================== */
+
+    _isPlainText(code) {
+        const trimmed = code.trim();
+        if (!trimmed) return true;
+
+        const codePunctuation = /[{};]|=>|->|::|#include|\b(?:int|void|float|double|char|bool|boolean|const|let|var|def|func|function|class|public|private|return|cout|cin|printf|scanf|System\.out|console\.log|unordered_map|unordered_set|vector<|auto\b)\b/;
+        const loopOrControl = /\b(for\s*\(|while\s*\(|if\s*\(|switch\s*\(|for\s+\w+\s+in\s+|while\s+[^:\n]+:)/;
+
+        const hasCodePunct = codePunctuation.test(trimmed);
+        const hasControl = loopOrControl.test(trimmed);
+
+        const englishWords = /\b(the|this|that|these|those|is|are|was|were|with|from|have|has|had|would|should|could|what|which|how|why|who|where|when|there|their|they|about|into|through|because|please|help|hello|hi|hey|can\s+you|tell\s+me|explain|paragraph|essay|sentence|article)\b/gi;
+        const englishMatches = trimmed.match(englishWords) || [];
+
+        const proseSentenceEnds = /[.?!](\s+[A-Z]|$)/g;
+        const sentenceEndMatches = trimmed.match(proseSentenceEnds) || [];
+
+        if (!hasCodePunct && !hasControl) {
+            if (englishMatches.length >= 2 || sentenceEndMatches.length >= 1) {
+                return true;
+            }
+        }
+
+        const words = trimmed.split(/\s+/).filter(w => w.length > 0);
+        if (words.length > 8 && (englishMatches.length / words.length) > 0.35 && !trimmed.includes('{') && !trimmed.includes(';')) {
+            return true;
+        }
+
+        return false;
     }
 
     /* ==================================================================
@@ -166,6 +206,52 @@ class ComplexityAnalyzer {
     }
 
     /* ==================================================================
+       DELIMITER MATCHING HELPERS
+       ================================================================== */
+
+    _findMatchingParen(str, openIdx) {
+        let depth = 0;
+        for (let i = openIdx; i < str.length; i++) {
+            if (str[i] === '(') depth++;
+            else if (str[i] === ')') {
+                depth--;
+                if (depth === 0) return i;
+            }
+        }
+        return -1;
+    }
+
+    _findMatchingBrace(str, openIdx) {
+        let depth = 0;
+        for (let i = openIdx; i < str.length; i++) {
+            if (str[i] === '{') depth++;
+            else if (str[i] === '}') {
+                depth--;
+                if (depth === 0) return i;
+            }
+        }
+        return -1;
+    }
+
+    _findStatementEnd(str, startIdx) {
+        let parenDepth = 0;
+        let braceDepth = 0;
+        for (let i = startIdx; i < str.length; i++) {
+            const ch = str[i];
+            if (ch === '(') parenDepth++;
+            else if (ch === ')') parenDepth--;
+            else if (ch === '{') braceDepth++;
+            else if (ch === '}') {
+                braceDepth--;
+                if (braceDepth <= 0 && parenDepth <= 0) return i;
+            } else if (ch === ';' && parenDepth === 0 && braceDepth === 0) {
+                return i;
+            }
+        }
+        return str.length - 1;
+    }
+
+    /* ==================================================================
        LOOP ANALYSIS
        ================================================================== */
 
@@ -201,102 +287,209 @@ class ComplexityAnalyzer {
     }
 
     _buildLoopTree(code, isPython) {
-        const lines = code.split('\n');
-        const loopRe = /\b(for|while|do)\b/;
-        const nodes = [];
-        const depthStack = [];
-
-        let braceDepth = 0;
-        const useIndent = isPython;
-
-        for (let li = 0; li < lines.length; li++) {
-            const raw = lines[li];
-            const trimmed = raw.trim();
-            if (!trimmed) continue;
-
-            const indent = raw.search(/\S/);
-            const isHOF = /\.(forEach|map|filter|reduce|flatMap|some|every)\s*\(/.test(trimmed);
-            const isLoop = loopRe.test(trimmed) || isHOF;
-
-            if (useIndent) {
-                while (depthStack.length && depthStack[depthStack.length - 1].indent >= indent) {
-                    depthStack.pop();
-                }
-            } else {
-                for (const ch of trimmed) {
-                    if (ch === '{') braceDepth++;
-                    else if (ch === '}') {
-                        braceDepth--;
-                        while (depthStack.length && depthStack[depthStack.length - 1].targetBrace > braceDepth) {
-                            depthStack.pop();
-                        }
-                    }
-                }
-            }
-
-            if (isLoop) {
-                const parentIdx = depthStack.length ? depthStack[depthStack.length - 1].nodeIdx : -1;
-                const depth = depthStack.length + 1;
-
-                const lookAhead = lines.slice(li, Math.min(li + 12, lines.length)).join('\n');
-                const bodyLines = this._extractLoopBodyLines(lines, li, isPython);
-                const iterType = this._classifyLoop(trimmed, lookAhead, bodyLines);
-
-                const node = {
-                    index: nodes.length,
-                    depth,
-                    parentIdx,
-                    children: [],
-                    headerLine: trimmed,
-                    iterType,
-                    lineNo: li,
-                    lookAhead,
-                };
-                nodes.push(node);
-
-                if (parentIdx >= 0) nodes[parentIdx].children.push(node);
-
-                if (useIndent) {
-                    depthStack.push({ indent, nodeIdx: node.index });
-                } else {
-                    if (trimmed.includes('{')) {
-                        depthStack.push({
-                            targetBrace: braceDepth,
-                            nodeIdx: node.index,
-                        });
-                    }
-                }
-            }
+        if (isPython) {
+            return this._buildPythonLoopTree(code);
         }
-
-        return nodes.filter(n => n.parentIdx === -1);
+        return this._buildCLoopTree(code);
     }
 
-    _extractLoopBodyLines(lines, startLi, isPython) {
-        const body = [];
-        if (isPython) {
-            const headerIndent = lines[startLi].search(/\S/);
-            for (let i = startLi + 1; i < lines.length; i++) {
-                const l = lines[i];
-                if (!l.trim()) continue;
-                if (l.search(/\S/) <= headerIndent) break;
-                body.push(l);
+    _buildCLoopTree(code) {
+        const loopRegex = /\b(for\s*\(|while\s*\(|do\b|\.(?:forEach|map|filter|reduce|flatMap)\s*\()/g;
+        const loops = [];
+        let match;
+        const doWhilePositions = new Set();
+
+        while ((match = loopRegex.exec(code)) !== null) {
+            const matchStr = match[1];
+            const startIndex = match.index;
+
+            if (doWhilePositions.has(startIndex)) {
+                continue;
             }
-            return body;
+
+            let keyword = '';
+            let headerEndIndex = -1;
+            let header = '';
+
+            if (matchStr.startsWith('for')) {
+                keyword = 'for';
+                const openParen = code.indexOf('(', startIndex);
+                const closeParen = this._findMatchingParen(code, openParen);
+                if (closeParen !== -1) {
+                    headerEndIndex = closeParen;
+                    header = code.substring(startIndex, closeParen + 1);
+                }
+            } else if (matchStr.startsWith('while')) {
+                keyword = 'while';
+                const openParen = code.indexOf('(', startIndex);
+                const closeParen = this._findMatchingParen(code, openParen);
+                if (closeParen !== -1) {
+                    headerEndIndex = closeParen;
+                    header = code.substring(startIndex, closeParen + 1);
+                }
+            } else if (matchStr.startsWith('do')) {
+                keyword = 'do';
+                headerEndIndex = startIndex + 1;
+                header = 'do';
+            } else if (matchStr.startsWith('.')) {
+                keyword = 'hof';
+                const openParen = code.indexOf('(', startIndex);
+                const closeParen = this._findMatchingParen(code, openParen);
+                if (closeParen !== -1) {
+                    headerEndIndex = closeParen;
+                    header = code.substring(startIndex, closeParen + 1);
+                }
+            }
+
+            if (headerEndIndex === -1) continue;
+
+            let bodyStartIndex = headerEndIndex + 1;
+            while (bodyStartIndex < code.length && /\s/.test(code[bodyStartIndex])) {
+                bodyStartIndex++;
+            }
+
+            let bodyEndIndex = -1;
+            if (bodyStartIndex < code.length && code[bodyStartIndex] === '{') {
+                const closeBrace = this._findMatchingBrace(code, bodyStartIndex);
+                bodyEndIndex = closeBrace !== -1 ? closeBrace + 1 : code.length;
+
+                if (keyword === 'do') {
+                    const afterBrace = code.substring(bodyEndIndex);
+                    const whileMatch = afterBrace.match(/^\s*while\s*\(/);
+                    if (whileMatch) {
+                        const whileIdx = bodyEndIndex + afterBrace.indexOf('while');
+                        doWhilePositions.add(whileIdx);
+                        const openP = code.indexOf('(', whileIdx);
+                        const closeP = this._findMatchingParen(code, openP);
+                        const semi = code.indexOf(';', closeP);
+                        bodyEndIndex = semi !== -1 ? semi + 1 : (closeP !== -1 ? closeP + 1 : bodyEndIndex);
+                    }
+                }
+            } else {
+                const stmtEnd = this._findStatementEnd(code, bodyStartIndex);
+                bodyEndIndex = stmtEnd + 1;
+            }
+
+            const body = code.substring(bodyStartIndex, bodyEndIndex).trim();
+            const iterType = this._classifyLoop(header.trim(), body, code);
+
+            loops.push({
+                index: loops.length,
+                keyword,
+                startIndex,
+                headerEndIndex,
+                bodyStartIndex,
+                bodyEndIndex,
+                headerLine: header.trim(),
+                body,
+                iterType,
+                children: [],
+                parentIdx: -1,
+                depth: 1
+            });
         }
 
-        let brace = 0;
-        let foundOpen = false;
-        for (let i = startLi; i < lines.length; i++) {
-            const l = lines[i];
-            for (const ch of l) {
-                if (ch === '{') { brace++; foundOpen = true; }
-                else if (ch === '}') { brace--; }
+        for (let i = 0; i < loops.length; i++) {
+            let bestParent = -1;
+            let minSpan = Infinity;
+            for (let j = 0; j < loops.length; j++) {
+                if (i === j) continue;
+                if (loops[i].startIndex >= loops[j].bodyStartIndex && loops[i].startIndex < loops[j].bodyEndIndex) {
+                    const span = loops[j].bodyEndIndex - loops[j].bodyStartIndex;
+                    if (span < minSpan) {
+                        minSpan = span;
+                        bestParent = j;
+                    }
+                }
             }
-            if (i > startLi) body.push(l);
-            if (foundOpen && brace === 0) break;
+            if (bestParent !== -1) {
+                loops[i].parentIdx = bestParent;
+                loops[bestParent].children.push(loops[i]);
+            }
         }
-        return body;
+
+        function setDepth(node, d) {
+            node.depth = d;
+            for (const ch of node.children) {
+                setDepth(ch, d + 1);
+            }
+        }
+        for (const l of loops) {
+            if (l.parentIdx === -1) {
+                setDepth(l, 1);
+            }
+        }
+
+        return loops.filter(n => n.parentIdx === -1);
+    }
+
+    _buildPythonLoopTree(code) {
+        const lines = code.split('\n');
+        const loops = [];
+        const loopPattern = /^\s*(?:for\s+\w+(?:\s*,\s*\w+)*\s+in\s+.*:|while\s+.*:)/;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (loopPattern.test(line)) {
+                const indent = line.search(/\S/);
+                const header = line.trim();
+                const bodyLines = [];
+                for (let j = i + 1; j < lines.length; j++) {
+                    const nextLine = lines[j];
+                    if (!nextLine.trim()) {
+                        bodyLines.push(nextLine);
+                        continue;
+                    }
+                    const nextIndent = nextLine.search(/\S/);
+                    if (nextIndent <= indent) break;
+                    bodyLines.push(nextLine);
+                }
+                const body = bodyLines.join('\n');
+                const iterType = this._classifyLoop(header, body, code);
+
+                loops.push({
+                    index: loops.length,
+                    lineNo: i,
+                    indent,
+                    headerLine: header,
+                    body,
+                    iterType,
+                    children: [],
+                    parentIdx: -1,
+                    depth: 1
+                });
+            }
+        }
+
+        for (let i = 0; i < loops.length; i++) {
+            let bestParent = -1;
+            for (let j = 0; j < loops.length; j++) {
+                if (i === j) continue;
+                if (loops[i].lineNo > loops[j].lineNo && loops[i].indent > loops[j].indent) {
+                    if (bestParent === -1 || loops[j].indent > loops[bestParent].indent) {
+                        bestParent = j;
+                    }
+                }
+            }
+            if (bestParent !== -1) {
+                loops[i].parentIdx = bestParent;
+                loops[bestParent].children.push(loops[i]);
+            }
+        }
+
+        function setDepth(node, d) {
+            node.depth = d;
+            for (const ch of node.children) {
+                setDepth(ch, d + 1);
+            }
+        }
+        for (const l of loops) {
+            if (l.parentIdx === -1) {
+                setDepth(l, 1);
+            }
+        }
+
+        return loops.filter(n => n.parentIdx === -1);
     }
 
     _flattenLoopTree(roots) {
@@ -306,15 +499,15 @@ class ComplexityAnalyzer {
         return out;
     }
 
-    _classifyLoop(header, lookAhead, bodyLines) {
-        if (this._isConstantEarlyExit(bodyLines)) return 'constant';
-        if (this._isTwoPointer(header, lookAhead)) return 'amortized-linear';
+    _classifyLoop(header, body, fullCode) {
+        if (this._isConstantEarlyExit(body)) return 'constant';
+        if (this._isTwoPointer(header, body)) return 'amortized-linear';
 
         const forMatch = header.match(/\bfor\s*\(\s*[^;]*;\s*([^;]*);\s*([^)]*)\)/);
         if (forMatch) {
             const cond   = forMatch[1].trim();
             const update = forMatch[2].trim();
-            return this._classifyForLoop(cond, update, lookAhead);
+            return this._classifyForLoop(cond, update, body);
         }
 
         const rangeMatch = header.match(/\bfor\s+\w+\s+in\s+range\s*\(([^)]*)\)/);
@@ -323,10 +516,10 @@ class ComplexityAnalyzer {
         }
 
         if (/\bwhile\b/.test(header)) {
-            return this._classifyWhileLoop(lookAhead);
+            return this._classifyWhileLoop(header, body);
         }
 
-        if (/\.(forEach|map|filter|reduce|flatMap|some|every)\s*\(/.test(header)) {
+        if (/\.(forEach|map|filter|reduce|flatMap)\s*\(/.test(header)) {
             return 'linear';
         }
 
@@ -335,7 +528,7 @@ class ComplexityAnalyzer {
         return 'linear';
     }
 
-    _classifyForLoop(cond, update, lookAhead) {
+    _classifyForLoop(cond, update, body) {
         if (/\w+\s*\*=\s*\d+/.test(update) ||
             /\w+\s*<<=/.test(update) ||
             /\w+\s*=\s*\w+\s*\*\s*\d+/.test(update)) {
@@ -357,7 +550,7 @@ class ComplexityAnalyzer {
         return 'linear';
     }
 
-    _classifyWhileLoop(lookAhead) {
+    _classifyWhileLoop(header, body) {
         const halvingPats = [
             /\w+\s*\/=\s*2/, /\w+\s*=\s*\w+\s*\/\s*2/,
             /\w+\s*>>=\s*1/, /\w+\s*=\s*\w+\s*>>\s*1/,
@@ -365,29 +558,36 @@ class ComplexityAnalyzer {
             /(?:hi|right|high|end|r)\s*=\s*(?:mid|middle)/,
             /mid\s*=\s*[\w(]+\s*[+]\s*[\w)]+\s*\/?\/?\/?\s*2/,
         ];
-        if (halvingPats.some(p => p.test(lookAhead))) return 'logarithmic';
+        if (halvingPats.some(p => p.test(body))) return 'logarithmic';
 
-        if (/(\w+)\s*=\s*\1\s*\*\s*\1/.test(lookAhead)) return 'loglog';
-        if (/(\w+)\s*\*\s*\1\s*</.test(lookAhead) || /sqrt/i.test(lookAhead)) return 'sqrt';
+        if (/(\w+)\s*=\s*\1\s*\*\s*\1/.test(body)) return 'loglog';
+        if (/(\w+)\s*\*\s*\1\s*</.test(header) || /(\w+)\s*\*\s*\1\s*</.test(body) || /sqrt/i.test(header) || /sqrt/i.test(body)) return 'sqrt';
 
         return 'linear';
     }
 
-    _isConstantEarlyExit(bodyLines) {
-        if (!bodyLines || bodyLines.length === 0) return false;
-        const content = bodyLines.map(l => l.trim()).filter(l => l && l !== '{' && l !== '}');
-        if (content.length === 0) return false;
-        const hasLoop = content.some(l => /\b(for|while)\b/.test(l));
+    _isConstantEarlyExit(body) {
+        if (!body || !body.trim()) return false;
+        let s = body.trim();
+        if (s.startsWith('{')) s = s.substring(1).trim();
+        if (s.endsWith('}')) s = s.substring(0, s.length - 1).trim();
+        if (!s) return false;
+
+        const lines = s.split('\n').map(l => l.trim()).filter(l => l && l !== '{' && l !== '}');
+        if (lines.length === 0) return false;
+
+        const hasLoop = lines.some(l => /\b(for\s*\(|while\s*\(|for\s+\w+\s+in|while\s+.*:)\b/.test(l));
         if (hasLoop) return false;
-        const first = content[0];
+
+        const first = lines[0];
         return /^(return|break)\b/.test(first);
     }
 
-    _isTwoPointer(header, lookAhead) {
+    _isTwoPointer(header, body) {
         if (!/\bfor\b/.test(header)) return false;
-        const innerWhile = lookAhead.match(/\bwhile\s*\([^)]*\)/);
+        const innerWhile = body.match(/\bwhile\s*\([^)]*\)/);
         if (!innerWhile) return false;
-        const bodyAfterWhile = lookAhead.substring(lookAhead.indexOf(innerWhile[0]));
+        const bodyAfterWhile = body.substring(body.indexOf(innerWhile[0]));
         const innerVar = innerWhile[0].match(/\b(\w+)\s*[<>]/);
         if (!innerVar) return false;
         const varName = innerVar[1];
@@ -494,25 +694,38 @@ class ComplexityAnalyzer {
 
     _countBranches(body, fnName) {
         const re = new RegExp(`\\b${fnName}\\s*\\(`, 'g');
-        const lines = body.split('\n');
-        let maxOnOneLine = 0;
-        for (const line of lines) {
-            const m = line.match(re);
-            if (m) maxOnOneLine = Math.max(maxOnOneLine, m.length);
+        let m;
+        const callOffsets = [];
+        while ((m = re.exec(body)) !== null) {
+            callOffsets.push(m.index);
         }
-        if (maxOnOneLine >= 2) return maxOnOneLine;
+        if (callOffsets.length <= 1) return callOffsets.length;
+
+        const stmts = body.split(/[;{}]/);
+        let maxInOneStmt = 0;
+        for (const s of stmts) {
+            const matches = s.match(re);
+            if (matches) maxInOneStmt = Math.max(maxInOneStmt, matches.length);
+        }
+        if (maxInOneStmt >= 2) return maxInOneStmt;
 
         let nonReturnCalls = 0;
-        for (const line of lines) {
-            const m = line.match(re);
-            if (!m) continue;
-            if (!/^return\b/.test(line.trim())) {
-                nonReturnCalls += m.length;
+        for (const offset of callOffsets) {
+            const textBefore = body.substring(0, offset);
+            const lastBoundary = Math.max(
+                textBefore.lastIndexOf(';'),
+                textBefore.lastIndexOf('{'),
+                textBefore.lastIndexOf('}'),
+                textBefore.lastIndexOf('\n')
+            );
+            const stmtBefore = textBefore.substring(lastBoundary + 1).trim();
+            if (!/\breturn\b/.test(stmtBefore)) {
+                nonReturnCalls++;
             }
         }
         if (nonReturnCalls >= 2) return nonReturnCalls;
 
-        return Math.max(1, maxOnOneLine);
+        return 1;
     }
 
     /* ==================================================================
@@ -594,7 +807,7 @@ class ComplexityAnalyzer {
         let loopDepth = 0;
         for (const line of lines) {
             const t = line.trim();
-            if (/\b(for|while|do)\b/.test(t) || /\.(forEach|map|filter|reduce)\s*\(/.test(t)) {
+            if (/\b(for\s*\(|while\s*\(|do\b)/.test(t) || /\.(forEach|map|filter|reduce)\s*\(/.test(t)) {
                 loopDepth++;
             }
 
@@ -630,30 +843,40 @@ class ComplexityAnalyzer {
 
     _analyzeSorting(code, loopInfo) {
         const sortPats = [
-            /\.sort\s*\(/, /\bsorted\s*\(/, /\bArrays\.sort\b/,
-            /\bCollections\.sort\b/, /\bstd::sort\b/, /\bsort\s*\(/,
-            /\bstable_sort\s*\(/,
+            /\.sort\s*\(/g, /\bsorted\s*\(/g, /\bArrays\.sort\b/g,
+            /\bCollections\.sort\b/g, /\bstd::sort\b/g, /\bsort\s*\(/g,
+            /\bstable_sort\s*\(/g,
         ];
 
-        const hasSorting = sortPats.some(p => p.test(code));
+        let hasSorting = false;
         let sortInsideLoop = false;
+        const sortIndices = [];
+
+        for (const p of sortPats) {
+            let m;
+            while ((m = p.exec(code)) !== null) {
+                hasSorting = true;
+                sortIndices.push(m.index);
+            }
+        }
 
         if (hasSorting && loopInfo && loopInfo.totalLoops > 0) {
-            let loopDepth = 0;
-            for (const line of code.split('\n')) {
-                const t = line.trim();
-                const isLoopHeader = /\b(for|while|do)\b/.test(t) || /\.(forEach|map|filter)\s*\(/.test(t);
-                if (isLoopHeader) loopDepth++;
-                if (loopDepth > 0 && sortPats.some(p => p.test(t)) && !isLoopHeader) {
-                    sortInsideLoop = true;
+            const allLoops = this._flattenLoopTree(this._buildLoopTree(code, false));
+            for (const idx of sortIndices) {
+                for (const l of allLoops) {
+                    if (l.bodyStartIndex !== undefined && l.bodyEndIndex !== undefined) {
+                        if (idx >= l.bodyStartIndex && idx < l.bodyEndIndex) {
+                            sortInsideLoop = true;
+                            break;
+                        }
+                    } else if (l.body) {
+                        if (/\.sort\s*\(|\bsorted\s*\(|\bArrays\.sort\b|\bCollections\.sort\b|\bstd::sort\b|\bsort\s*\(|\bstable_sort\s*\(/.test(l.body)) {
+                            sortInsideLoop = true;
+                            break;
+                        }
+                    }
                 }
-                const opens  = (t.match(/\{/g) || []).length;
-                const closes = (t.match(/\}/g) || []).length;
-                if (!isLoopHeader) {
-                    loopDepth = Math.max(0, loopDepth - closes);
-                } else {
-                    loopDepth = Math.max(0, loopDepth - (closes - opens));
-                }
+                if (sortInsideLoop) break;
             }
         }
 
@@ -710,8 +933,6 @@ class ComplexityAnalyzer {
             const withLib = this._multiplyC(lc, lib.maxLoopBodyCost);
 
             if (rec.isRecursive && rec.recursionType === 'divide-and-conquer' && rec.branchingFactor >= 2) {
-                // In divide-and-conquer (e.g. mergeSort), helper loops represent O(n) merge work
-                // T(n) = 2T(n/2) + O(n) => O(n log n) by Master Theorem
                 tc = worst = { n: 1, logn: 1, label: 'O(n log n)' };
             } else {
                 tc    = this._maxC(tc, withLib);
