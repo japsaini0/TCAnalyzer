@@ -236,7 +236,7 @@ fn main() {
     }
 
     /**
-     * Execute code either in-browser (JS / Pyodide Python) or via Wandbox remote compiler
+     * Execute code either in-browser (JS / Pyodide Python), via local compiler server, or via Wandbox remote compiler
      * @param {string} code 
      * @param {string} language 
      * @param {string} stdin 
@@ -256,13 +256,58 @@ fn main() {
             try {
                 return await this._executePythonInBrowser(code, startTime, stdin);
             } catch (pyErr) {
-                console.warn('Pyodide in-browser execution fallback to remote:', pyErr);
-                // Fallback to Wandbox if Pyodide fails
+                console.warn('Pyodide in-browser execution fallback to local server or remote:', pyErr);
             }
         }
 
-        // 3. Remote execution via Wandbox with auto-retry
+        // 3. Fast path: Local Server Execution (sub-second native compilation for C++, C, Python, etc.)
+        if (!forceRemote) {
+            try {
+                const localResult = await this._executeLocalServer(code, normLang, stdin, startTime);
+                if (localResult && localResult.supportedLocally !== false) {
+                    return localResult;
+                }
+            } catch (serverErr) {
+                // Local server endpoint not reachable -> fallback smoothly to remote Wandbox
+            }
+        }
+
+        // 4. Remote execution via Wandbox with auto-retry
         return await this._executeWandboxWithRetry(code, normLang, stdin, startTime);
+    }
+
+    /**
+     * Attempts execution via local Node backend (/api/run) for near-instant native compiles
+     */
+    async _executeLocalServer(code, language, stdin = '', startTime = performance.now()) {
+        const isHttp = typeof window !== 'undefined' && 
+                       (window.location.protocol === 'http:' || window.location.protocol === 'https:');
+        if (!isHttp) return null;
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+        try {
+            const res = await fetch('/api/run', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code, language, stdin }),
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+
+            if (!res.ok) return null;
+
+            const data = await res.json();
+            if (!data || data.supportedLocally === false) {
+                return null;
+            }
+
+            return data;
+        } catch (e) {
+            clearTimeout(timeoutId);
+            return null;
+        }
     }
 
     /**
@@ -334,18 +379,24 @@ fn main() {
      * Executes code via Wandbox with automatic retry on transient OCI / container overload errors
      */
     async _executeWandboxWithRetry(code, language, stdin = '', startTime = performance.now(), retries = 2) {
-        const compiler = this.compilers[language] || this.compilers['python'];
+        let compiler = this.compilers[language] || this.compilers['python'];
         let lastError = null;
 
         for (let attempt = 1; attempt <= retries; attempt++) {
             try {
+                // If retrying C++ or C, try alternate compiler head if container failed on attempt 1
+                if (attempt > 1 && language === 'cpp' && compiler === 'gcc-13.2.0') {
+                    compiler = 'gcc-head';
+                }
+
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 18000);
+                const timeoutId = setTimeout(() => controller.abort(), 16000);
 
                 const payload = {
                     code: code,
                     compiler: compiler,
-                    stdin: stdin || ''
+                    stdin: stdin || '',
+                    'compiler-option-raw': (language === 'cpp' || language === 'c') ? '-O0' : ''
                 };
 
                 const response = await fetch(this.apiEndpoint, {
@@ -370,29 +421,45 @@ fn main() {
                 const exitStatus = data.status;
 
                 // Check for transient container overload errors (e.g., OCI runtime error, crun: clone)
-                const isOverloadError = compilerErr.includes('OCI runtime error') || 
-                                       compilerErr.includes('Resource temporarily unavailable') || 
-                                       compilerErr.includes('crun: clone') || 
-                                       exitStatus === '126';
+                const fullErr = (compilerErr + '\n' + stderr);
+                const isOverloadError = fullErr.includes('OCI runtime error') || 
+                                       fullErr.includes('Resource temporarily unavailable') || 
+                                       fullErr.includes('crun: clone') || 
+                                       exitStatus === '126' ||
+                                       exitStatus === 126;
 
                 if (isOverloadError && attempt < retries) {
-                    console.warn(`Wandbox busy (attempt ${attempt}/${retries}). Retrying in 1200ms...`);
-                    await new Promise(r => setTimeout(r, 1200));
+                    console.warn(`Wandbox busy (attempt ${attempt}/${retries}). Retrying with alternate compiler in 800ms...`);
+                    await new Promise(r => setTimeout(r, 800));
                     continue; // Retry
                 }
 
                 // If still overloaded on final attempt, format user-friendly message
                 let finalCompilerErr = compilerErr;
                 if (isOverloadError) {
-                    finalCompilerErr = '⚠️ The remote compiler sandbox is temporarily experiencing high traffic (container limit reached).\nClick "Run Code" again in a few seconds to retry.';
+                    finalCompilerErr = '⚠️ The remote compiler sandbox is temporarily experiencing high traffic (container limit reached).\nClick "Run Code" again in a few seconds to retry, or run via local server for instant execution.';
                 }
 
-                const isSuccess = (exitStatus === '0' || exitStatus === 0) && !compilerErr;
+                const isSuccess = (exitStatus === '0' || exitStatus === 0) && !compilerErr && !isOverloadError;
 
                 return {
                     success: isSuccess,
-                    compiler: compiler,
+                    compiler: `${compiler} (Wandbox Remote Sandbox)`,
                     language: language,
+                    stdout: stdout,
+                    stderr: stderr,
+                    compilerError: finalCompilerErr,
+                    exitCode: exitStatus !== undefined ? exitStatus : (isSuccess ? 0 : 1),
+                    durationMs: duration,
+                    isLocal: false
+                };
+            } catch (err) {
+                lastError = err;
+                if (attempt < retries) {
+                    await new Promise(r => setTimeout(r, 800));
+                }
+            }
+        }
                     stdout: stdout,
                     stderr: stderr,
                     compilerError: finalCompilerErr,

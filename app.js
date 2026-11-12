@@ -146,41 +146,237 @@
         lineNumbers.scrollTop = codeInput.scrollTop;
     });
 
-    // Handle Tab key in editor
-    codeInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Tab') {
-            e.preventDefault();
-            const start = codeInput.selectionStart;
-            const end = codeInput.selectionEnd;
-            codeInput.value = codeInput.value.substring(0, start) + '    ' + codeInput.value.substring(end);
-            codeInput.selectionStart = codeInput.selectionEnd = start + 4;
-            updateEditorMeta();
-            if (liveToggle.checked) {
-                triggerLiveAnalysis();
+    // ==================== VS Code-Style Smart Code Editor ====================
+    const AUTO_PAIRS = {
+        '(': ')',
+        '[': ']',
+        '{': '}',
+        '"': '"',
+        "'": "'",
+        '`': '`'
+    };
+
+    function setupSmartCodeEditor(textarea) {
+        textarea.addEventListener('keydown', (e) => {
+            if (e.isComposing) return;
+
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+            const val = textarea.value;
+            const hasSelection = end > start;
+
+            // 1. Shortcut executions
+            // Ctrl+Shift+Enter: Run & Analyze
+            if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'Enter') {
+                e.preventDefault();
+                runCode(true);
+                return;
+            }
+
+            // Shift+Enter: Run Code
+            if (e.shiftKey && e.key === 'Enter') {
+                e.preventDefault();
+                runCode(false);
+                return;
+            }
+
+            // Ctrl+Enter: Analyze Complexity
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                runAnalysis();
+                return;
+            }
+
+            // 2. Tab & Shift+Tab (Indentation)
+            if (e.key === 'Tab') {
+                e.preventDefault();
+                if (hasSelection && val.substring(start, end).includes('\n')) {
+                    // Multi-line indent / unindent
+                    const lineStart = val.lastIndexOf('\n', start - 1) + 1;
+                    const lineEnd = val.indexOf('\n', end);
+                    const effectiveEnd = lineEnd === -1 ? val.length : lineEnd;
+                    const selectedBlock = val.substring(lineStart, effectiveEnd);
+                    const lines = selectedBlock.split('\n');
+
+                    let modifiedLines;
+                    if (e.shiftKey) {
+                        modifiedLines = lines.map(line => line.replace(/^( {1,4}|\t)/, ''));
+                    } else {
+                        modifiedLines = lines.map(line => '    ' + line);
+                    }
+
+                    const replacement = modifiedLines.join('\n');
+                    textarea.setRangeText(replacement, lineStart, effectiveEnd, 'select');
+                } else if (e.shiftKey) {
+                    // Single-line unindent
+                    const lineStart = val.lastIndexOf('\n', start - 1) + 1;
+                    const linePrefix = val.substring(lineStart, start);
+                    const spacesToRemove = Math.min((linePrefix.match(/^[ ]*/) || [''])[0].length, 4);
+                    if (spacesToRemove > 0) {
+                        textarea.setRangeText('', lineStart, lineStart + spacesToRemove, 'end');
+                        textarea.selectionStart = textarea.selectionEnd = Math.max(lineStart, start - spacesToRemove);
+                    }
+                } else {
+                    // Insert 4 spaces
+                    insertText(textarea, '    ', start + 4);
+                }
+                updateEditorMeta();
+                if (liveToggle.checked) triggerLiveAnalysis();
+                return;
+            }
+
+            // 3. Auto-close opening brackets & quotes, or wrap selection
+            if (AUTO_PAIRS[e.key] && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                const openChar = e.key;
+                const closeChar = AUTO_PAIRS[openChar];
+
+                // Case A: Selection wrapping (e.g. select text and press ( -> (text))
+                if (hasSelection) {
+                    e.preventDefault();
+                    const selectedText = val.substring(start, end);
+                    const wrapped = openChar + selectedText + closeChar;
+                    insertText(textarea, wrapped);
+                    textarea.selectionStart = start + 1;
+                    textarea.selectionEnd = end + 1;
+                    updateEditorMeta();
+                    if (liveToggle.checked) triggerLiveAnalysis();
+                    return;
+                }
+
+                // Case B: Quotes - do not auto-close if preceded by a word char (e.g. don't)
+                if (openChar === '"' || openChar === "'" || openChar === '`') {
+                    const prevChar = start > 0 ? val[start - 1] : '';
+                    const nextChar = val[start] || '';
+
+                    // If overtyping the same closing quote
+                    if (nextChar === openChar) {
+                        e.preventDefault();
+                        textarea.selectionStart = textarea.selectionEnd = start + 1;
+                        return;
+                    }
+
+                    // Word character before quote (e.g. don't)
+                    if (/\w/.test(prevChar)) {
+                        return;
+                    }
+
+                    // Only auto-close quote if at end of text, whitespace, or punctuation
+                    if (!nextChar || /[\s\)\}\],;\.\:]/.test(nextChar)) {
+                        e.preventDefault();
+                        insertText(textarea, openChar + closeChar);
+                        textarea.selectionStart = textarea.selectionEnd = start + 1;
+                        updateEditorMeta();
+                        if (liveToggle.checked) triggerLiveAnalysis();
+                        return;
+                    }
+                    return;
+                }
+
+                // Case C: Brackets ( (, [, { )
+                e.preventDefault();
+                insertText(textarea, openChar + closeChar);
+                textarea.selectionStart = textarea.selectionEnd = start + 1;
+                updateEditorMeta();
+                if (liveToggle.checked) triggerLiveAnalysis();
+                return;
+            }
+
+            // 4. Overtype closing character (step over ), ], }, etc. when already in front of cursor)
+            if ((')]}'.includes(e.key) || e.key === '"' || e.key === "'" || e.key === '`') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                if (!hasSelection && val[start] === e.key) {
+                    e.preventDefault();
+                    textarea.selectionStart = textarea.selectionEnd = start + 1;
+                    return;
+                }
+            }
+
+            // 5. Smart Backspace (delete matching empty pair at once)
+            if (e.key === 'Backspace' && !hasSelection && start > 0) {
+                const prevChar = val[start - 1];
+                const nextChar = val[start];
+                if (AUTO_PAIRS[prevChar] === nextChar) {
+                    e.preventDefault();
+                    deletePair(textarea, start - 1, start + 1);
+                    updateEditorMeta();
+                    if (liveToggle.checked) triggerLiveAnalysis();
+                    return;
+                }
+            }
+
+            // 6. Smart Enter (auto-indent & bracket expansion)
+            if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                const lineStart = val.lastIndexOf('\n', start - 1) + 1;
+                const currentLine = val.substring(lineStart, start);
+                const indentMatch = currentLine.match(/^[ \t]*/);
+                const currentIndent = indentMatch ? indentMatch[0] : '';
+                const prevChar = start > 0 ? val[start - 1] : '';
+                const nextChar = val[start] || '';
+
+                // Case A: Pressed Enter between matching braces/brackets ({|}, [|], (|))
+                if ((prevChar === '{' && nextChar === '}') || 
+                    (prevChar === '[' && nextChar === ']') || 
+                    (prevChar === '(' && nextChar === ')')) {
+                    e.preventDefault();
+                    const innerIndent = currentIndent + '    ';
+                    const insertion = '\n' + innerIndent + '\n' + currentIndent;
+                    insertText(textarea, insertion);
+                    textarea.selectionStart = textarea.selectionEnd = start + 1 + innerIndent.length;
+                    updateEditorMeta();
+                    if (liveToggle.checked) triggerLiveAnalysis();
+                    return;
+                }
+
+                // Case B: Normal line break with auto-indent
+                e.preventDefault();
+                let extraIndent = '';
+                const trimmedLine = currentLine.trim();
+                if (trimmedLine.endsWith('{') || trimmedLine.endsWith(':') || trimmedLine.endsWith('(') || trimmedLine.endsWith('[')) {
+                    extraIndent = '    ';
+                }
+                const newIndent = currentIndent + extraIndent;
+                insertText(textarea, '\n' + newIndent);
+                textarea.selectionStart = textarea.selectionEnd = start + 1 + newIndent.length;
+                updateEditorMeta();
+                if (liveToggle.checked) triggerLiveAnalysis();
+                return;
+            }
+        });
+
+        function insertText(elem, text, newCursor) {
+            elem.focus();
+            let success = false;
+            try {
+                success = document.execCommand('insertText', false, text);
+            } catch (err) {
+                success = false;
+            }
+            if (!success) {
+                const s = elem.selectionStart;
+                const e = elem.selectionEnd;
+                elem.setRangeText(text, s, e, 'end');
+            }
+            if (newCursor !== undefined) {
+                elem.selectionStart = elem.selectionEnd = newCursor;
             }
         }
 
-        // Ctrl+Shift+Enter: Run & Analyze
-        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'Enter') {
-            e.preventDefault();
-            runCode(true);
-            return;
+        function deletePair(elem, from, to) {
+            elem.focus();
+            elem.setSelectionRange(from, to);
+            let success = false;
+            try {
+                success = document.execCommand('delete');
+            } catch (err) {
+                success = false;
+            }
+            if (!success) {
+                elem.setRangeText('', from, to, 'end');
+                elem.selectionStart = elem.selectionEnd = from;
+            }
         }
+    }
 
-        // Shift+Enter: Run Code
-        if (e.shiftKey && e.key === 'Enter') {
-            e.preventDefault();
-            runCode(false);
-            return;
-        }
-
-        // Ctrl+Enter: Analyze Complexity
-        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-            e.preventDefault();
-            runAnalysis();
-            return;
-        }
-    });
+    setupSmartCodeEditor(codeInput);
 
     function updateEditorMeta() {
         const code = codeInput.value;
