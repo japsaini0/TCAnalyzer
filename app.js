@@ -8,6 +8,8 @@
 
     const analyzer = new ComplexityAnalyzer();
 
+    const runner = new CodeRunner();
+
     // ==================== DOM References ====================
     const $ = (sel) => document.querySelector(sel);
     const $$ = (sel) => document.querySelectorAll(sel);
@@ -15,6 +17,11 @@
     const codeInput = $('#codeInput');
     const lineNumbers = $('#lineNumbers');
     const analyzeBtn = $('#analyzeBtn');
+    const runBtn = $('#runBtn');
+    const runAnalyzeBtn = $('#runAnalyzeBtn');
+    const liveToggle = $('#liveToggle');
+    const templateBtn = $('#templateBtn');
+    const languageSelect = $('#languageSelect');
     const clearBtn = $('#clearBtn');
     const copyBtn = $('#copyBtn');
     const copyResultBtn = $('#copyResultBtn');
@@ -30,8 +37,21 @@
     const learnGrid = $('#learnGrid');
     const toast = $('#toast');
 
+    // Terminal DOM
+    const terminalOutput = $('#terminalOutput');
+    const stdinInput = $('#stdinInput');
+    const termStatusDot = $('#termStatusDot');
+    const termMetaChip = $('#termMetaChip');
+    const copyTermBtn = $('#copyTermBtn');
+    const clearTermBtn = $('#clearTermBtn');
+    const termTabs = $$('.term-tab');
+    const termPaneOutput = $('#termPaneOutput');
+    const termPaneStdin = $('#termPaneStdin');
+
     let totalQueries = parseInt(localStorage.getItem('tc_queries') || '0');
     let history = JSON.parse(localStorage.getItem('tc_history') || '[]');
+    let lastExecutionMetrics = null;
+    let liveDebounceTimer = null;
 
     // ==================== Theme ====================
     const savedTheme = localStorage.getItem('tc_theme') || 'dark';
@@ -65,8 +85,72 @@
         });
     });
 
+    // ==================== Terminal Tabs & Controls ====================
+    termTabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            termTabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            if (tab.dataset.termTab === 'output') {
+                termPaneOutput.classList.add('active');
+                termPaneStdin.classList.remove('active');
+            } else {
+                termPaneOutput.classList.remove('active');
+                termPaneStdin.classList.add('active');
+                stdinInput.focus();
+            }
+        });
+    });
+
+    clearTermBtn.addEventListener('click', () => {
+        terminalOutput.innerHTML = '<span class="term-dim">$ Terminal cleared. Ready for next execution.</span>';
+        termStatusDot.className = 'term-status-dot idle';
+        termMetaChip.style.display = 'none';
+        showToast('Terminal output cleared');
+    });
+
+    copyTermBtn.addEventListener('click', () => {
+        const text = terminalOutput.innerText;
+        if (text) {
+            navigator.clipboard.writeText(text);
+            showToast('Terminal output copied!');
+        }
+    });
+
+    // ==================== Template & Language Select ====================
+    templateBtn.addEventListener('click', () => {
+        const lang = languageSelect.value === 'auto' ? 'python' : languageSelect.value;
+        const template = runner.getTemplate(lang);
+        codeInput.value = template;
+        updateEditorMeta();
+        showToast(`Loaded ${lang.toUpperCase()} runnable template!`);
+        if (liveToggle.checked) {
+            triggerLiveAnalysis();
+        }
+    });
+
+    languageSelect.addEventListener('change', () => {
+        const lang = languageSelect.value;
+        if (lang !== 'auto') {
+            const currentCode = codeInput.value.trim();
+            const isDefaultTemplate = Object.values(runner.templates).some(t => t.trim() === currentCode);
+            if (!currentCode || isDefaultTemplate) {
+                codeInput.value = runner.getTemplate(lang);
+                updateEditorMeta();
+            }
+        }
+        if (liveToggle.checked) {
+            triggerLiveAnalysis();
+        }
+    });
+
     // ==================== Code Editor ====================
-    codeInput.addEventListener('input', updateEditorMeta);
+    codeInput.addEventListener('input', () => {
+        updateEditorMeta();
+        if (liveToggle.checked) {
+            triggerLiveAnalysis();
+        }
+    });
+
     codeInput.addEventListener('scroll', () => {
         lineNumbers.scrollTop = codeInput.scrollTop;
     });
@@ -80,6 +164,30 @@
             codeInput.value = codeInput.value.substring(0, start) + '    ' + codeInput.value.substring(end);
             codeInput.selectionStart = codeInput.selectionEnd = start + 4;
             updateEditorMeta();
+            if (liveToggle.checked) {
+                triggerLiveAnalysis();
+            }
+        }
+
+        // Ctrl+Shift+Enter: Run & Analyze
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'Enter') {
+            e.preventDefault();
+            runCode(true);
+            return;
+        }
+
+        // Shift+Enter: Run Code
+        if (e.shiftKey && e.key === 'Enter') {
+            e.preventDefault();
+            runCode(false);
+            return;
+        }
+
+        // Ctrl+Enter: Analyze Complexity
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+            e.preventDefault();
+            runAnalysis();
+            return;
         }
     });
 
@@ -106,35 +214,157 @@
         }
     });
 
-    // ==================== Analysis ====================
-    analyzeBtn.addEventListener('click', runAnalysis);
+    // ==================== Live Analysis ====================
+    function triggerLiveAnalysis() {
+        clearTimeout(liveDebounceTimer);
+        liveDebounceTimer = setTimeout(() => {
+            const code = codeInput.value.trim();
+            if (!code) return;
+            const lang = languageSelect.value;
+            const result = analyzer.analyze(code, lang);
+            if (!result.error) {
+                renderResults(result, code, lastExecutionMetrics, true);
+                copyResultBtn.style.display = '';
+            }
+        }, 400);
+    }
 
-    // Ctrl+Enter shortcut
-    codeInput.addEventListener('keydown', (e) => {
-        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-            e.preventDefault();
-            runAnalysis();
+    liveToggle.addEventListener('change', () => {
+        if (liveToggle.checked) {
+            triggerLiveAnalysis();
+            showToast('Live Big-O analysis enabled');
+        } else {
+            showToast('Live Big-O analysis paused');
         }
     });
 
-    function runAnalysis() {
+    // ==================== Execution & Analysis ====================
+    runBtn.addEventListener('click', () => runCode(false));
+    runAnalyzeBtn.addEventListener('click', () => runCode(true));
+    analyzeBtn.addEventListener('click', () => runAnalysis());
+
+    async function runCode(andAnalyze = false) {
+        const code = codeInput.value.trim();
+        if (!code) {
+            showToast('Please write or paste some code first!');
+            return;
+        }
+
+        let lang = languageSelect.value;
+        if (lang === 'auto') {
+            const detected = analyzer._detectLanguage(code);
+            lang = detected || 'python';
+        }
+
+        const stdin = stdinInput.value;
+
+        // Ensure output tab is visible
+        termTabs[0].click();
+
+        // Loading states
+        runBtn.disabled = true;
+        runBtn.querySelector('.btn-content').style.display = 'none';
+        runBtn.querySelector('.btn-loading').style.display = 'flex';
+
+        if (andAnalyze) {
+            runAnalyzeBtn.disabled = true;
+            runAnalyzeBtn.querySelector('.btn-content').style.display = 'none';
+            runAnalyzeBtn.querySelector('.btn-loading').style.display = 'flex';
+        }
+
+        termStatusDot.className = 'term-status-dot running';
+        termMetaChip.style.display = 'inline-block';
+        termMetaChip.className = 'term-meta-chip chip-running';
+        termMetaChip.textContent = 'Compiling & Running...';
+        terminalOutput.innerHTML = `<span class="term-dim">$ Compiling and executing with ${lang}...</span>\n`;
+
+        try {
+            const execResult = await runner.execute(code, lang, stdin);
+            lastExecutionMetrics = execResult;
+
+            let formatted = '';
+
+            if (execResult.success) {
+                termStatusDot.className = 'term-status-dot success';
+                termMetaChip.className = 'term-meta-chip chip-success';
+                termMetaChip.textContent = `Exit 0 · ${execResult.durationMs}ms`;
+
+                if (execResult.stdout) {
+                    formatted += `<span class="term-stdout">${escapeHtml(execResult.stdout)}</span>`;
+                } else {
+                    formatted += `<span class="term-dim">(Program exited successfully with code 0 - No stdout output)</span>\n`;
+                }
+
+                if (execResult.stderr) {
+                    formatted += `\n<span class="term-stderr">[stderr]:\n${escapeHtml(execResult.stderr)}</span>`;
+                }
+            } else {
+                termStatusDot.className = 'term-status-dot error';
+                termMetaChip.className = 'term-meta-chip chip-error';
+                termMetaChip.textContent = `Exit ${execResult.exitCode !== undefined ? execResult.exitCode : 1} · ${execResult.durationMs}ms`;
+
+                if (execResult.compilerError) {
+                    formatted += `<span class="term-stderr">${escapeHtml(execResult.compilerError)}</span>\n`;
+                }
+                if (execResult.stderr && execResult.stderr !== execResult.compilerError) {
+                    formatted += `<span class="term-stderr">${escapeHtml(execResult.stderr)}</span>\n`;
+                }
+                if (execResult.stdout) {
+                    formatted += `<span class="term-stdout">${escapeHtml(execResult.stdout)}</span>\n`;
+                }
+                if (!formatted) {
+                    formatted = `<span class="term-stderr">Execution failed with exit code ${execResult.exitCode}</span>\n`;
+                }
+            }
+
+            terminalOutput.innerHTML = formatted;
+            terminalOutput.scrollTop = terminalOutput.scrollHeight;
+
+            totalQueries++;
+            queryCount.textContent = totalQueries;
+            localStorage.setItem('tc_queries', totalQueries);
+
+            if (andAnalyze || liveToggle.checked) {
+                const analysisResult = analyzer.analyze(code, lang);
+                renderResults(analysisResult, code, execResult);
+                addToHistory(analysisResult, code, execResult);
+                copyResultBtn.style.display = '';
+            }
+        } catch (err) {
+            termStatusDot.className = 'term-status-dot error';
+            termMetaChip.className = 'term-meta-chip chip-error';
+            termMetaChip.textContent = 'Error';
+            terminalOutput.innerHTML = `<span class="term-stderr">Runtime Error: ${escapeHtml(err.message)}</span>`;
+        } finally {
+            runBtn.disabled = false;
+            runBtn.querySelector('.btn-content').style.display = 'flex';
+            runBtn.querySelector('.btn-loading').style.display = 'none';
+
+            if (andAnalyze) {
+                runAnalyzeBtn.disabled = false;
+                runAnalyzeBtn.querySelector('.btn-content').style.display = 'flex';
+                runAnalyzeBtn.querySelector('.btn-loading').style.display = 'none';
+            }
+        }
+    }
+
+    function runAnalysis(executionMetrics = lastExecutionMetrics) {
         const code = codeInput.value.trim();
         if (!code) {
             showToast('Please paste some code first!');
             return;
         }
 
-        const lang = $('#languageSelect').value;
+        const lang = languageSelect.value;
 
         // Show loading state
         analyzeBtn.disabled = true;
         analyzeBtn.querySelector('.btn-content').style.display = 'none';
         analyzeBtn.querySelector('.btn-loading').style.display = 'flex';
 
-        // Simulate brief processing delay for UX
         setTimeout(() => {
             const result = analyzer.analyze(code, lang);
-            renderResults(result, code);
+            renderResults(result, code, executionMetrics);
 
             // Update query counter
             totalQueries++;
@@ -142,7 +372,7 @@
             localStorage.setItem('tc_queries', totalQueries);
 
             // Save to history
-            addToHistory(result, code);
+            addToHistory(result, code, executionMetrics);
 
             // Reset button
             analyzeBtn.disabled = false;
@@ -150,10 +380,10 @@
             analyzeBtn.querySelector('.btn-loading').style.display = 'none';
 
             copyResultBtn.style.display = '';
-        }, 600);
+        }, 300);
     }
 
-    function renderResults(result, code) {
+    function renderResults(result, code, executionMetrics = lastExecutionMetrics, isLive = false) {
         if (result.error) {
             resultsBody.innerHTML = `
                 <div class="empty-state">
@@ -167,6 +397,36 @@
         const r = result;
 
         resultsBody.innerHTML = `
+            ${executionMetrics ? `
+            <!-- Execution Benchmark Card -->
+            <div class="benchmark-card">
+                <div class="benchmark-header">
+                    <div class="benchmark-title">
+                        <span>⚡ Execution Benchmark</span>
+                    </div>
+                    <span class="complexity-badge ${executionMetrics.success ? 'badge-good' : 'badge-bad'}">
+                        ${executionMetrics.success ? '✓ Run Succeeded' : '✗ Execution Failed'}
+                    </span>
+                </div>
+                <div class="benchmark-metrics">
+                    <div class="metric-item">
+                        <div class="metric-label">Execution Time</div>
+                        <div class="metric-value">${executionMetrics.durationMs} ms</div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="metric-label">Status</div>
+                        <div class="metric-value">${executionMetrics.exitCode === 0 ? 'Exit 0' : 'Exit ' + executionMetrics.exitCode}</div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="metric-label">Compiler Engine</div>
+                        <div class="metric-value" style="font-size:0.75rem;">${escapeHtml(executionMetrics.compiler || 'Default')}</div>
+                    </div>
+                </div>
+                <div class="benchmark-footer">
+                    💡 <strong>Empirical Runtime:</strong> Code executed in <strong>${executionMetrics.durationMs}ms</strong>. Theoretical time complexity is <strong>${r.timeComplexity}</strong>.
+                </div>
+            </div>` : ''}
+
             <!-- Complexity Badge -->
             <div class="result-complexity">
                 <div class="complexity-label">Time Complexity</div>
@@ -235,10 +495,11 @@
             </div>
         `;
 
-        // Animate in
-        resultsBody.style.animation = 'none';
-        void resultsBody.offsetHeight; // trigger reflow
-        resultsBody.style.animation = 'fadeIn 0.4s ease';
+        if (!isLive) {
+            resultsBody.style.animation = 'none';
+            void resultsBody.offsetHeight;
+            resultsBody.style.animation = 'fadeIn 0.35s ease';
+        }
     }
 
     // Copy results
@@ -251,15 +512,16 @@
     });
 
     // ==================== History ====================
-    function addToHistory(result, code) {
+    function addToHistory(result, code, executionMetrics = null) {
         const entry = {
             id: Date.now(),
             code: code.substring(0, 500),
             language: result.language,
             timeComplexity: result.timeComplexity,
             spaceComplexity: result.spaceComplexity,
+            runtime: executionMetrics ? `${executionMetrics.durationMs}ms` : null,
             rating: result.rating,
-            timestamp: new Date().toLocaleString(),
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         };
 
         history.unshift(entry);
@@ -279,7 +541,7 @@
             <div class="history-card" data-code="${escapeHtml(h.code)}">
                 <div class="history-card-header">
                     <span class="history-complexity">${h.timeComplexity}</span>
-                    <span class="history-lang">${h.language}</span>
+                    <span class="history-lang">${h.language}${h.runtime ? ` · ⏱ ${h.runtime}` : ''}</span>
                 </div>
                 <div class="history-preview">${escapeHtml(h.code.substring(0, 120))}</div>
                 <div class="history-time">${h.timestamp}</div>
@@ -298,6 +560,9 @@
                 $('#tab-analyzer').classList.add('active');
                 codeInput.focus();
                 showToast('Code loaded from history!');
+                if (liveToggle.checked) {
+                    triggerLiveAnalysis();
+                }
             });
         });
     }
@@ -730,6 +995,22 @@ int getValue(unordered_map<string, int>& map, string key) {
     }
 
     // ==================== Init ====================
+    if (!codeInput.value.trim()) {
+        codeInput.value = runner.getTemplate('python');
+        languageSelect.value = 'python';
+    }
     updateEditorMeta();
+    if (liveToggle.checked) {
+        setTimeout(triggerLiveAnalysis, 300);
+    }
+
+    // Pre-warm Pyodide WebAssembly runtime in background
+    if (typeof loadPyodide !== 'undefined') {
+        runner._pyodidePromise = loadPyodide({
+            indexURL: "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/"
+        }).catch(err => {
+            console.warn('Background Pyodide pre-warm notice:', err);
+        });
+    }
 
 })();

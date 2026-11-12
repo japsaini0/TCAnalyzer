@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>⚡ TC Analyzer — Time Complexity Analyzer</title>
+    <title>⚡ TC Analyzer Studio — Live Code Compiler & Complexity Engine</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -18,10 +18,11 @@
             <div class="logo">
                 <span class="logo-icon">⚡</span>
                 <span class="logo-text">TC<span class="logo-accent">Analyzer</span></span>
+                <span class="badge-edition">Compiler Edition</span>
             </div>
         </div>
         <nav class="header-nav">
-            <button class="nav-btn active" data-tab="analyzer">Analyzer</button>
+            <button class="nav-btn active" data-tab="analyzer">IDE & Analyzer</button>
             <button class="nav-btn" data-tab="examples">Examples</button>
             <button class="nav-btn" data-tab="learn">Learn Big O</button>
         </nav>
@@ -30,7 +31,7 @@
                 <span class="theme-icon">🌙</span>
             </button>
             <div class="query-counter">
-                <span id="queryCount">0</span> / ∞ queries
+                <span id="queryCount">0</span> / ∞ executions
             </div>
         </div>
     </header>
@@ -38,40 +39,41 @@
     <!-- Main Content -->
     <main class="main-content">
 
-        <!-- ====== ANALYZER TAB ====== -->
+        <!-- ====== ANALYZER & COMPILER TAB ====== -->
         <section class="tab-content active" id="tab-analyzer">
             <div class="hero">
                 <h1 class="hero-title">
-                    Analyze Your Code's
-                    <span class="gradient-text">Time Complexity</span>
+                    Write, Compile & Analyze
+                    <span class="gradient-text">Live Complexity</span>
                 </h1>
                 <p class="hero-subtitle">
-                    Paste any code snippet — get instant Big O analysis with detailed explanations.
-                    <br>Supports Python, JavaScript, Java, C++, Go, and pseudocode.
+                    Run your code in real-time across 7+ languages while inspecting theoretical Big O time & space complexity side-by-side.
                 </p>
             </div>
 
             <div class="analyzer-grid">
-                <!-- Code Input Panel -->
+                <!-- Code Input & Terminal Panel -->
                 <div class="panel code-panel">
                     <div class="panel-header">
                         <div class="panel-title">
-                            <span class="panel-icon">📝</span>
-                            Code Input
+                            <span class="panel-icon">💻</span>
+                            Code Editor & Compiler
                         </div>
                         <div class="panel-actions">
-                            <select id="languageSelect" class="language-select">
+                            <select id="languageSelect" class="language-select" title="Select programming language">
                                 <option value="auto">Auto Detect</option>
-                                <option value="python">Python</option>
-                                <option value="javascript">JavaScript</option>
-                                <option value="java">Java</option>
-                                <option value="cpp">C++</option>
-                                <option value="c">C</option>
-                                <option value="go">Go</option>
-                                <option value="typescript">TypeScript</option>
-                                <option value="rust">Rust</option>
+                                <option value="python">Python 3.12</option>
+                                <option value="javascript">JavaScript (V8/Node)</option>
+                                <option value="cpp">C++ (GCC 13)</option>
+                                <option value="c">C (GCC 13)</option>
+                                <option value="java">Java (JDK 22)</option>
+                                <option value="go">Go 1.23</option>
+                                <option value="rust">Rust 1.82</option>
                                 <option value="pseudo">Pseudocode</option>
                             </select>
+                            <button class="action-pill-btn" id="templateBtn" title="Load a runnable starter template for this language">
+                                <span>📄 Template</span>
+                            </button>
                             <button class="icon-btn" id="clearBtn" title="Clear code">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
                             </button>
@@ -80,41 +82,102 @@
                             </button>
                         </div>
                     </div>
+
+                    <!-- Editor -->
                     <div class="code-editor-wrapper">
                         <div class="line-numbers" id="lineNumbers">1</div>
                         <textarea 
                             id="codeInput" 
                             class="code-editor" 
-                            placeholder="Paste your code here...
-
-Example:
-vector<int> twoSum(vector<int>& nums, int target) {
-    unordered_map<int, int> seen;
-    for (int i = 0; i < nums.size(); i++) {
-        int comp = target - nums[i];
-        if (seen.count(comp))
-            return {seen[comp], i};
-        seen[nums[i]] = i;
-    }
-    return {};
-}"
+                            placeholder="# Write or paste your code here...
+# Click 'Run Code' (Shift+Enter) to compile and execute
+# Click 'Analyze Complexity' (Ctrl+Enter) to evaluate Big-O notation"
                             spellcheck="false"
                         ></textarea>
                     </div>
-                    <div class="panel-footer">
-                        <div class="char-count">
-                            <span id="charCount">0</span> characters · <span id="lineCount">0</span> lines
+
+                    <!-- Action Toolbar -->
+                    <div class="panel-toolbar">
+                        <div class="toolbar-left">
+                            <div class="char-count">
+                                <span id="charCount">0</span> chars · <span id="lineCount">0</span> lines
+                            </div>
+                            <label class="live-toggle" title="Continuously analyze Big-O complexity as you type">
+                                <input type="checkbox" id="liveToggle" checked>
+                                <span class="toggle-slider"></span>
+                                <span class="toggle-label">⚡ Live Big O</span>
+                            </label>
                         </div>
-                        <button class="analyze-btn" id="analyzeBtn">
-                            <span class="btn-content">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                                Analyze Complexity
-                            </span>
-                            <span class="btn-loading" style="display:none;">
-                                <div class="spinner"></div>
-                                Analyzing...
-                            </span>
-                        </button>
+
+                        <div class="btn-group">
+                            <button class="btn btn-run" id="runBtn" title="Run code (Shift + Enter)">
+                                <span class="btn-content">
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                                    Run Code
+                                </span>
+                                <span class="btn-loading" style="display:none;">
+                                    <div class="spinner"></div>
+                                    Running...
+                                </span>
+                            </button>
+
+                            <button class="btn btn-run-analyze" id="runAnalyzeBtn" title="Run code & analyze complexity simultaneously (Ctrl + Shift + Enter)">
+                                <span class="btn-content">
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                                    Run & Analyze
+                                </span>
+                                <span class="btn-loading" style="display:none;">
+                                    <div class="spinner"></div>
+                                    Executing...
+                                </span>
+                            </button>
+
+                            <button class="btn btn-analyze" id="analyzeBtn" title="Analyze time and space complexity (Ctrl + Enter)">
+                                <span class="btn-content">
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                                    Analyze Big O
+                                </span>
+                                <span class="btn-loading" style="display:none;">
+                                    <div class="spinner"></div>
+                                    Analyzing...
+                                </span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Integrated Terminal & Console -->
+                    <div class="terminal-container">
+                        <div class="terminal-header">
+                            <div class="terminal-tabs">
+                                <button class="term-tab active" data-term-tab="output">
+                                    <span class="term-status-dot idle" id="termStatusDot"></span>
+                                    <span>Console Output</span>
+                                </button>
+                                <button class="term-tab" data-term-tab="stdin">
+                                    <span>Standard Input (stdin)</span>
+                                </button>
+                            </div>
+
+                            <div class="terminal-meta">
+                                <span class="term-meta-chip" id="termMetaChip" style="display:none;"></span>
+                                <button class="icon-btn sm" id="copyTermBtn" title="Copy output">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                                </button>
+                                <button class="icon-btn sm" id="clearTermBtn" title="Clear console">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Console Output Tab Pane -->
+                        <div class="terminal-tab-pane active" id="termPaneOutput">
+                            <pre class="terminal-screen" id="terminalOutput"><span class="term-dim">$ Terminal ready. Click "Run Code" or press Shift+Enter to execute.</span></pre>
+                        </div>
+
+                        <!-- Standard Input Tab Pane -->
+                        <div class="terminal-tab-pane" id="termPaneStdin">
+                            <textarea id="stdinInput" class="stdin-editor" placeholder="Provide test inputs here if your program reads from standard input (cin, input(), Scanner, etc.)..."></textarea>
+                        </div>
                     </div>
                 </div>
 
@@ -123,7 +186,7 @@ vector<int> twoSum(vector<int>& nums, int target) {
                     <div class="panel-header">
                         <div class="panel-title">
                             <span class="panel-icon">📊</span>
-                            Analysis Results
+                            Live Complexity & Metrics
                         </div>
                         <div class="panel-actions">
                             <button class="icon-btn" id="copyResultBtn" title="Copy results" style="display:none;">
@@ -135,11 +198,11 @@ vector<int> twoSum(vector<int>& nums, int target) {
                         <div class="empty-state">
                             <div class="empty-icon">🔍</div>
                             <h3>No Analysis Yet</h3>
-                            <p>Paste your code on the left and click <strong>"Analyze Complexity"</strong> to get started.</p>
+                            <p>Write your code on the left and click <strong>"Run Code"</strong> or <strong>"Analyze Big O"</strong>.</p>
                             <div class="empty-features">
                                 <div class="feature-chip">⏱ Time Complexity</div>
                                 <div class="feature-chip">💾 Space Complexity</div>
-                                <div class="feature-chip">📖 Explanation</div>
+                                <div class="feature-chip">🚀 Runtime Benchmarks</div>
                                 <div class="feature-chip">💡 Optimization Tips</div>
                             </div>
                         </div>
@@ -150,7 +213,7 @@ vector<int> twoSum(vector<int>& nums, int target) {
             <!-- History Section -->
             <div class="history-section" id="historySection" style="display:none;">
                 <div class="section-header">
-                    <h2><span class="section-icon">🕐</span> Analysis History</h2>
+                    <h2><span class="section-icon">🕐</span> Execution & Analysis History</h2>
                     <button class="text-btn" id="clearHistoryBtn">Clear All</button>
                 </div>
                 <div class="history-grid" id="historyGrid"></div>
@@ -161,7 +224,7 @@ vector<int> twoSum(vector<int>& nums, int target) {
         <section class="tab-content" id="tab-examples">
             <div class="section-header centered">
                 <h2>📚 Pre-loaded Algorithm Examples</h2>
-                <p>Click any example to load it into the analyzer</p>
+                <p>Click any algorithm to inspect its complexity and run it live</p>
             </div>
             <div class="examples-grid" id="examplesGrid"></div>
         </section>
@@ -182,13 +245,16 @@ vector<int> twoSum(vector<int>& nums, int target) {
 
     <!-- Footer -->
     <footer class="footer">
-        <p>⚡ TC Analyzer — Built for developers, by developers. All analysis runs locally in your browser.</p>
+        <p>⚡ TC Analyzer Studio — Interactive Code Runner & Big-O Engine. Real-time client-side analysis + multi-language compilation.</p>
     </footer>
 
     <!-- Toast Notification -->
     <div class="toast" id="toast"></div>
 
+    <!-- Pyodide: In-Browser WebAssembly Python Runner -->
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
     <script src="analyzer.js"></script>
+    <script src="runner.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
