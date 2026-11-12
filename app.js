@@ -129,16 +129,7 @@
     });
 
     languageSelect.addEventListener('change', () => {
-        const lang = languageSelect.value;
-        if (lang !== 'auto') {
-            const currentCode = codeInput.value.trim();
-            const isDefaultTemplate = Object.values(runner.templates).some(t => t.trim() === currentCode);
-            if (!currentCode || isDefaultTemplate) {
-                codeInput.value = runner.getTemplate(lang);
-                updateEditorMeta();
-            }
-        }
-        if (liveToggle.checked) {
+        if (liveToggle.checked && codeInput.value.trim()) {
             triggerLiveAnalysis();
         }
     });
@@ -995,14 +986,8 @@ int getValue(unordered_map<string, int>& map, string key) {
     }
 
     // ==================== Init ====================
-    if (!codeInput.value.trim()) {
-        codeInput.value = runner.getTemplate('python');
-        languageSelect.value = 'python';
-    }
+    codeInput.value = '';
     updateEditorMeta();
-    if (liveToggle.checked) {
-        setTimeout(triggerLiveAnalysis, 300);
-    }
 
     // Pre-warm Pyodide WebAssembly runtime in background
     if (typeof loadPyodide !== 'undefined') {
