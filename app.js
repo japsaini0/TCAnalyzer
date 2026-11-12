@@ -171,7 +171,10 @@
             <div class="result-complexity">
                 <div class="complexity-label">Time Complexity</div>
                 <div class="complexity-value">${r.timeComplexity}</div>
-                <span class="complexity-badge ${r.rating.class}">${r.rating.emoji} ${r.rating.label}</span>
+                <div style="display:flex; justify-content:center; align-items:center; gap:8px; flex-wrap:wrap;">
+                    <span class="complexity-badge ${r.rating.class}">${r.rating.emoji} ${r.rating.label}</span>
+                    ${r.isUncertain ? '<span class="complexity-badge badge-uncertain">⚠️ Uncertain Estimate</span>' : ''}
+                </div>
             </div>
 
             <!-- Detail Cards -->
@@ -201,6 +204,17 @@
                     <div class="detail-value" style="text-transform:capitalize">${r.language}</div>
                 </div>
             </div>
+
+            ${r.assumptions && r.assumptions.length > 0 ? `
+            <!-- Assumptions & Uncertainty -->
+            <div class="result-section">
+                <div class="result-section-title">⚠️ Assumptions & Uncertainty</div>
+                <div class="result-section-content">
+                    <ul>
+                        ${r.assumptions.map(a => `<li>${escapeHtml(a)}</li>`).join('')}
+                    </ul>
+                </div>
+            </div>` : ''}
 
             <!-- Explanation -->
             <div class="result-section">

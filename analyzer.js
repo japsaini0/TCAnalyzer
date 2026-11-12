@@ -1,12 +1,12 @@
 /**
- * TC Analyzer — Core Analysis Engine (v3)
+ * TC Analyzer — Core Analysis Engine (v4)
  *
  * Multi-pass static analysis that models loop iteration counts,
- * recursion branching / Master-Theorem application, library-call costs,
- * and space usage. Runs entirely in the browser — zero dependencies.
+ * recursion branching / Master-Theorem application, language-specific costs,
+ * control-flow best/average/worst cases, and auxiliary space usage.
+ * Runs entirely in the browser — zero dependencies.
  *
  * Public API: const result = new ComplexityAnalyzer().analyze(code, lang?)
- * Result shape is identical so app.js requires no changes.
  */
 
 class ComplexityAnalyzer {
@@ -23,7 +23,7 @@ class ComplexityAnalyzer {
 
         if (this._isPlainText(code)) {
             return {
-                error: 'Input appears to be plain text or a description rather than code. Please paste a programming code snippet (e.g., C++, Python, Java, JavaScript).'
+                error: 'Input appears to be plain text or a description rather than code. Please paste a programming code snippet (e.g., C++, Python, Java, JavaScript, Go).'
             };
         }
 
@@ -35,15 +35,24 @@ class ComplexityAnalyzer {
         const loopInfo = this._analyzeLoops(norm, isPython);
         const recInfo  = this._analyzeRecursion(norm, funcs, isPython);
         const dsInfo   = this._analyzeDataStructures(norm);
-        const libInfo  = this._analyzeLibraryCalls(norm, loopInfo);
+        const libInfo  = this._analyzeLibraryCalls(norm, loopInfo, isPython);
         const sortInfo = this._analyzeSorting(norm, loopInfo);
 
-        const time  = this._determineTime(loopInfo, recInfo, dsInfo, libInfo, sortInfo);
-        const space = this._determineSpace(norm, loopInfo, recInfo, dsInfo);
+        const time  = this._determineTime(loopInfo, recInfo, dsInfo, libInfo, sortInfo, norm, isPython);
+        const space = this._determineSpace(norm, loopInfo, recInfo, dsInfo, isPython);
 
-        const explanation   = this._buildExplanation(loopInfo, recInfo, dsInfo, libInfo, sortInfo, time);
+        const explanation   = this._buildExplanation(loopInfo, recInfo, dsInfo, libInfo, sortInfo, time, space);
         const optimizations = this._suggestOptimizations(time, loopInfo, norm);
         const rating        = this._getRating(time.notation);
+
+        const isUncertain = Boolean(time.isUncertain || space.isUncertain || loopInfo.isUncertain || recInfo.isUncertain);
+        const assumptions = [
+            ...(loopInfo.assumptions || []),
+            ...(recInfo.assumptions || []),
+            ...(time.assumptions || []),
+            ...(space.assumptions || [])
+        ];
+        const uniqueAssumptions = [...new Set(assumptions)];
 
         return {
             language: detectedLang,
@@ -55,6 +64,9 @@ class ComplexityAnalyzer {
             rating,
             explanation,
             optimizations,
+            isUncertain,
+            confidence: isUncertain ? 'uncertain' : 'high',
+            assumptions: uniqueAssumptions,
             details: {
                 loops:          loopInfo,
                 recursion:      recInfo,
@@ -74,7 +86,7 @@ class ComplexityAnalyzer {
         if (!trimmed) return true;
 
         const codePunctuation = /[{};]|=>|->|::|#include|\b(?:int|void|float|double|char|bool|boolean|const|let|var|def|func|function|class|public|private|return|cout|cin|printf|scanf|System\.out|console\.log|unordered_map|unordered_set|vector<|auto\b)\b/;
-        const loopOrControl = /\b(for\s*\(|while\s*\(|if\s*\(|switch\s*\(|for\s+\w+\s+in\s+|while\s+[^:\n]+:)/;
+        const loopOrControl = /\b(for\s*\(|while\s*\(|if\s*\(|switch\s*\(|for\s+\w+\s+in\s+|while\s+[^:\n]+:|for\s+[^;{]+;)/;
 
         const hasCodePunct = codePunctuation.test(trimmed);
         const hasControl = loopOrControl.test(trimmed);
@@ -105,7 +117,7 @@ class ComplexityAnalyzer {
 
     _detectLanguage(code) {
         const indicators = {
-            python:     [/\bdef\s+\w+\s*\(/, /\bimport\s+\w+/, /\bprint\s*\(/, /:\s*$/m, /\belif\b/, /\bself\b/],
+            python:     [/\bdef\s+\w+\s*\(/, /\bimport\s+\w+/, /\bprint\s*\(/, /:\s*$/m, /\belif\b/, /\bself\b/, /\bfor\s+\w+\s+in\s+range\b/],
             javascript: [/\bfunction\s+\w+/, /\bconst\s+/, /\blet\s+/, /=>/, /\bconsole\.log/, /\bvar\s+/],
             java:       [/\bpublic\s+(?:static\s+)?(?:void|int|String|boolean)/, /\bSystem\.out/, /\bclass\s+\w+/, /\bprivate\s+/, /\bnew\s+\w+/],
             cpp: [
@@ -118,7 +130,7 @@ class ComplexityAnalyzer {
                 /\bbool\s+\w+\s*\([^)]*\)\s*\{/, /\blong\s+long\b/
             ],
             c:          [/#include\s*<stdio/, /\bprintf\s*\(/, /\bscanf\s*\(/, /\bmalloc\s*\(/, /\bint\s+main\s*\(/],
-            go:         [/\bfunc\s+\w+/, /\bpackage\s+\w+/, /\bfmt\./, /\b:=\b/, /\bgo\s+\w+/],
+            go:         [/\bfunc\s+\w+/, /\bpackage\s+\w+/, /\bfmt\./, /\b:=\b/, /\bgo\s+\w+/, /\bfor\s+[\w\s:=;<>+*-]+\{/],
             typescript: [/:\s*(?:string|number|boolean|any)\b/, /\binterface\s+\w+/, /\btype\s+\w+\s*=/, /\bas\s+\w+/],
             rust:       [/\bfn\s+\w+/, /\blet\s+mut\b/, /\bimpl\s+/, /\b->\s*/, /\bpub\s+fn/],
         };
@@ -262,6 +274,11 @@ class ComplexityAnalyzer {
             loopTypes: [],
             nestedStructure: [],
             combinedComplexity: null,
+            combinedWorst: null,
+            combinedBest: null,
+            combinedAverage: null,
+            isUncertain: false,
+            assumptions: [],
         };
 
         const ast = this._buildLoopTree(code, isPython);
@@ -274,14 +291,29 @@ class ComplexityAnalyzer {
             type: n.iterType,
             line: n.headerLine,
             complexity: n.iterType,
+            hasEarlyReturn: n.hasEarlyReturn,
+            hasBreak: n.hasBreak,
         }));
         result.nestedStructure = all.filter(n => n.depth === result.maxNestingDepth)
             .map(n => n.headerLine);
 
-        const topComplexities = ast.map(n => this._loopTreeComplexity(n, code));
-        result.combinedComplexity = topComplexities.reduce(
+        const nodeResults = ast.map(n => this._loopTreeNodeComplexity(n, code));
+
+        result.combinedWorst = nodeResults.map(r => r.worst).reduce(
             (a, b) => this._maxC(a, b), C1
         );
+        result.combinedBest = nodeResults.map(r => r.best).reduce(
+            (a, b) => this._maxC(a, b), C1
+        );
+        result.combinedAverage = result.combinedWorst;
+        result.combinedComplexity = result.combinedWorst;
+
+        result.isUncertain = nodeResults.some(r => r.isUncertain);
+        for (const r of nodeResults) {
+            if (r.assumptions && r.assumptions.length > 0) {
+                result.assumptions.push(...r.assumptions);
+            }
+        }
 
         return result;
     }
@@ -294,7 +326,8 @@ class ComplexityAnalyzer {
     }
 
     _buildCLoopTree(code) {
-        const loopRegex = /\b(for\s*\(|while\s*\(|do\b|\.(?:forEach|map|filter|reduce|flatMap)\s*\()/g;
+        // Matches C/C++/Java/JS for(...), Go for init; cond; update {, Go for cond {, while(...), do-while, HOFs
+        const loopRegex = /\b(for\s*\(|for\s+[^;{]+;[^;{]+;[^{]+\{|for\s+[a-zA-Z0-9_<>=! .]+\{|while\s*\(|while\s+[^{]+\{|do\b|\.(?:forEach|map|filter|reduce|flatMap)\s*\()/g;
         const loops = [];
         let match;
         const doWhilePositions = new Set();
@@ -313,19 +346,36 @@ class ComplexityAnalyzer {
 
             if (matchStr.startsWith('for')) {
                 keyword = 'for';
-                const openParen = code.indexOf('(', startIndex);
-                const closeParen = this._findMatchingParen(code, openParen);
-                if (closeParen !== -1) {
-                    headerEndIndex = closeParen;
-                    header = code.substring(startIndex, closeParen + 1);
+                if (code[match.index + 3] === '(' || code.indexOf('(', startIndex) < code.indexOf('{', startIndex) && code.indexOf('(', startIndex) !== -1) {
+                    const openParen = code.indexOf('(', startIndex);
+                    const closeParen = this._findMatchingParen(code, openParen);
+                    if (closeParen !== -1) {
+                        headerEndIndex = closeParen;
+                        header = code.substring(startIndex, closeParen + 1);
+                    }
+                } else {
+                    // Go-style for loop without parentheses
+                    const braceIdx = code.indexOf('{', startIndex);
+                    if (braceIdx !== -1) {
+                        headerEndIndex = braceIdx - 1;
+                        header = code.substring(startIndex, braceIdx).trim();
+                    }
                 }
             } else if (matchStr.startsWith('while')) {
                 keyword = 'while';
                 const openParen = code.indexOf('(', startIndex);
-                const closeParen = this._findMatchingParen(code, openParen);
-                if (closeParen !== -1) {
-                    headerEndIndex = closeParen;
-                    header = code.substring(startIndex, closeParen + 1);
+                if (openParen !== -1 && (code.indexOf('{', startIndex) === -1 || openParen < code.indexOf('{', startIndex))) {
+                    const closeParen = this._findMatchingParen(code, openParen);
+                    if (closeParen !== -1) {
+                        headerEndIndex = closeParen;
+                        header = code.substring(startIndex, closeParen + 1);
+                    }
+                } else {
+                    const braceIdx = code.indexOf('{', startIndex);
+                    if (braceIdx !== -1) {
+                        headerEndIndex = braceIdx - 1;
+                        header = code.substring(startIndex, braceIdx).trim();
+                    }
                 }
             } else if (matchStr.startsWith('do')) {
                 keyword = 'do';
@@ -371,7 +421,7 @@ class ComplexityAnalyzer {
             }
 
             const body = code.substring(bodyStartIndex, bodyEndIndex).trim();
-            const iterType = this._classifyLoop(header.trim(), body, code);
+            const classification = this._classifyLoop(header.trim(), body, code, false);
 
             loops.push({
                 index: loops.length,
@@ -382,7 +432,11 @@ class ComplexityAnalyzer {
                 bodyEndIndex,
                 headerLine: header.trim(),
                 body,
-                iterType,
+                iterType: classification.type,
+                hasEarlyReturn: classification.hasEarlyReturn,
+                hasBreak: classification.hasBreak,
+                isUncertain: classification.isUncertain,
+                assumption: classification.assumption,
                 children: [],
                 parentIdx: -1,
                 depth: 1
@@ -426,7 +480,7 @@ class ComplexityAnalyzer {
     _buildPythonLoopTree(code) {
         const lines = code.split('\n');
         const loops = [];
-        const loopPattern = /^\s*(?:for\s+\w+(?:\s*,\s*\w+)*\s+in\s+.*:|while\s+.*:)/;
+        const loopPattern = /^\s*(?:for\s+[\w\s,()]+\s+in\s+.*:|while\s+.*:)/;
 
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
@@ -445,7 +499,7 @@ class ComplexityAnalyzer {
                     bodyLines.push(nextLine);
                 }
                 const body = bodyLines.join('\n');
-                const iterType = this._classifyLoop(header, body, code);
+                const classification = this._classifyLoop(header, body, code, true);
 
                 loops.push({
                     index: loops.length,
@@ -453,7 +507,11 @@ class ComplexityAnalyzer {
                     indent,
                     headerLine: header,
                     body,
-                    iterType,
+                    iterType: classification.type,
+                    hasEarlyReturn: classification.hasEarlyReturn,
+                    hasBreak: classification.hasBreak,
+                    isUncertain: classification.isUncertain,
+                    assumption: classification.assumption,
                     children: [],
                     parentIdx: -1,
                     depth: 1
@@ -499,71 +557,212 @@ class ComplexityAnalyzer {
         return out;
     }
 
-    _classifyLoop(header, body, fullCode) {
-        if (this._isConstantEarlyExit(body)) return 'constant';
-        if (this._isTwoPointer(header, body)) return 'amortized-linear';
+    /* ==================================================================
+       LOOP CLASSIFICATION
+       ================================================================== */
 
-        const forMatch = header.match(/\bfor\s*\(\s*[^;]*;\s*([^;]*);\s*([^)]*)\)/);
-        if (forMatch) {
-            const cond   = forMatch[1].trim();
-            const update = forMatch[2].trim();
-            return this._classifyForLoop(cond, update, body);
+    _classifyLoop(header, body, fullCode, isPython) {
+        const hasEarlyReturn = /\breturn\b|\bthrow\b/.test(body);
+        const hasBreak = /\bbreak\b/.test(body);
+
+        if (this._isConstantEarlyExit(body)) {
+            return { type: 'constant', hasEarlyReturn: true, hasBreak, isUncertain: false };
+        }
+        if (this._isTwoPointer(header, body)) {
+            return { type: 'amortized-linear', hasEarlyReturn, hasBreak, isUncertain: false };
         }
 
-        const rangeMatch = header.match(/\bfor\s+\w+\s+in\s+range\s*\(([^)]*)\)/);
+        // C / JS / Java / Go for loop with parentheses
+        const forMatch = header.match(/\bfor\s*\(\s*([^;]*);\s*([^;]*);\s*([^)]*)\)/);
+        if (forMatch) {
+            const init   = forMatch[1].trim();
+            const cond   = forMatch[2].trim();
+            const update = forMatch[3].trim();
+            const type = this._classifyForLoop(cond, update, body, init);
+            return { type, hasEarlyReturn, hasBreak, isUncertain: type === 'uncertain' };
+        }
+
+        // Go-style for loop: for init; cond; update
+        const goForMatch = header.match(/\bfor\s+([^;{]+);\s*([^;{]+);\s*([^{]+)/);
+        if (goForMatch) {
+            const init   = goForMatch[1].trim();
+            const cond   = goForMatch[2].trim();
+            const update = goForMatch[3].trim();
+            const type = this._classifyForLoop(cond, update, body, init);
+            return { type, hasEarlyReturn, hasBreak, isUncertain: type === 'uncertain' };
+        }
+
+        // Python for in range(...)
+        const rangeMatch = header.match(/\bfor\s+[\w\s,()]+\s+in\s+range\s*\(([^)]*)\)/);
         if (rangeMatch) {
-            return 'linear';
+            const rawArgs = rangeMatch[1].trim();
+            if (rawArgs) {
+                const args = rawArgs.split(',').map(a => a.trim());
+                // If all range arguments are numeric constants (e.g. range(10), range(0, 10, 2)) -> O(1)
+                const allConst = args.length > 0 && args.every(a => /^-?\d+$/.test(a));
+                if (allConst) {
+                    return { type: 'constant', hasEarlyReturn, hasBreak, isUncertain: false };
+                }
+            }
+            return { type: 'linear', hasEarlyReturn, hasBreak, isUncertain: false };
+        }
+
+        // Fixed collections in Python or JS/Go (e.g. for x in [1, 2, 3]:)
+        const fixedCollMatch = header.match(/\bfor\s+[\w\s,()]+\s+in\s*(\[[^\]]*\]|\([^)]*\)|\{[^}]*\})/);
+        if (fixedCollMatch) {
+            const inner = fixedCollMatch[1].slice(1, -1).trim();
+            const items = inner ? inner.split(',').map(x => x.trim()) : [];
+            const allLiteral = items.every(x => /^(?:-?\d+|["'].*["']|true|false)$/i.test(x));
+            if (allLiteral) {
+                return { type: 'constant', hasEarlyReturn, hasBreak, isUncertain: false };
+            }
+        }
+
+        // Rust range: for i in 0..10
+        const rustRangeMatch = header.match(/\bfor\s+\w+\s+in\s+(\d+)\.\.(\d+)/);
+        if (rustRangeMatch) {
+            return { type: 'constant', hasEarlyReturn, hasBreak, isUncertain: false };
         }
 
         if (/\bwhile\b/.test(header)) {
-            return this._classifyWhileLoop(header, body);
+            const whileRes = this._classifyWhileLoop(header, body);
+            return {
+                type: whileRes.type,
+                hasEarlyReturn,
+                hasBreak,
+                isUncertain: whileRes.isUncertain,
+                assumption: whileRes.assumption,
+            };
         }
 
         if (/\.(forEach|map|filter|reduce|flatMap)\s*\(/.test(header)) {
-            return 'linear';
+            return { type: 'linear', hasEarlyReturn, hasBreak, isUncertain: false };
         }
 
-        if (/\bfor\s+\w+\s+in\b/.test(header)) return 'linear';
+        if (/\bfor\s+[\w\s,()]+\s+in\b/.test(header) || /\bfor\s+[\w\s,()]+\s+of\b/.test(header)) {
+            return { type: 'linear', hasEarlyReturn, hasBreak, isUncertain: false };
+        }
 
-        return 'linear';
+        // Go for i < n {
+        const goWhileMatch = header.match(/\bfor\s+([^;{]+)\s*\{?/);
+        if (goWhileMatch) {
+            const cond = goWhileMatch[1].trim();
+            const whileRes = this._classifyWhileLoop('while ' + cond, body);
+            return {
+                type: whileRes.type,
+                hasEarlyReturn,
+                hasBreak,
+                isUncertain: whileRes.isUncertain,
+                assumption: whileRes.assumption,
+            };
+        }
+
+        return { type: 'linear', hasEarlyReturn, hasBreak, isUncertain: false };
     }
 
-    _classifyForLoop(cond, update, body) {
+    _classifyForLoop(cond, update, body, init = '') {
+        // Constant condition check: e.g. i < 10, i <= 100, i > 0
+        const isConstCond = /^[a-zA-Z_]\w*\s*(?:<|<=)\s*\d+$/.test(cond.trim()) ||
+                            /^\d+\s*(?:>|>=)\s*[a-zA-Z_]\w*$/.test(cond.trim()) ||
+                            /^[a-zA-Z_]\w*\s*(?:>|>=)\s*\d+$/.test(cond.trim());
+        const isLinearUpdate = /\+\+|--|\+=\s*\d+|-=\s*\d+/.test(update);
+        const isConstInit = !init || /\b\w+\s*=\s*\d+/.test(init) || /:=\s*\d+/.test(init);
+
+        if (isConstCond && isLinearUpdate && isConstInit) {
+            return 'constant';
+        }
+
+        // Doubling / exponential multiplication
         if (/\w+\s*\*=\s*\d+/.test(update) ||
             /\w+\s*<<=/.test(update) ||
-            /\w+\s*=\s*\w+\s*\*\s*\d+/.test(update)) {
+            /\w+\s*=\s*\w+\s*\*\s*\d+/.test(update) ||
+            /\w+\s*=\s*\d+\s*\*\s*\w+/.test(update) ||
+            /\w+\s*=\s*\w+\s*<<\s*\d+/.test(update)) {
             return 'logarithmic';
         }
+
+        // Halving / exponential division
         if (/\w+\s*\/=\s*\d+/.test(update) ||
             /\w+\s*>>=/.test(update) ||
-            /\w+\s*=\s*\w+\s*\/\s*\d+/.test(update)) {
+            /\w+\s*=\s*\w+\s*\/\s*\d+/.test(update) ||
+            /\w+\s*=\s*\w+\s*>>\s*\d+/.test(update)) {
             return 'logarithmic';
         }
+
         if (/(\w+)\s*=\s*\1\s*\*\s*\1/.test(update)) return 'loglog';
         if (/(\w+)\s*\*\s*\1\s*</.test(cond) || /sqrt/i.test(cond)) return 'sqrt';
 
         if (/(\w+)\s*\+=\s*(\w+)/.test(update)) {
-            const [, loopVar, stepVar] = update.match(/(\w+)\s*\+=\s*(\w+)/);
-            if (stepVar !== loopVar && !/^\d+$/.test(stepVar)) return 'harmonic';
+            const m = update.match(/(\w+)\s*\+=\s*(\w+)/);
+            if (m) {
+                const [, loopVar, stepVar] = m;
+                if (stepVar !== loopVar && !/^\d+$/.test(stepVar)) return 'harmonic';
+            }
         }
 
         return 'linear';
     }
 
     _classifyWhileLoop(header, body) {
+        if (this._isConstantEarlyExit(body)) {
+            return { type: 'constant', isUncertain: false };
+        }
+
+        // Halving: i /= 2, i //= 2, i >>= 1, mid binary search updates
         const halvingPats = [
-            /\w+\s*\/=\s*2/, /\w+\s*=\s*\w+\s*\/\s*2/,
-            /\w+\s*>>=\s*1/, /\w+\s*=\s*\w+\s*>>\s*1/,
+            /\b\w+\s*(?:\/=|>>=|\/\/=)\s*\d+/,
+            /\b\w+\s*=\s*\w+\s*(?:\/|>>|\/\/)\s*\d+/,
+            /\b\w+\s*=\s*(?:Math\.floor|Math\.trunc)\s*\(\s*\w+\s*\/\s*\d+\s*\)/,
             /(?:lo|left|low|start|l)\s*=\s*(?:mid|middle)/,
             /(?:hi|right|high|end|r)\s*=\s*(?:mid|middle)/,
-            /mid\s*=\s*[\w(]+\s*[+]\s*[\w)]+\s*\/?\/?\/?\s*2/,
+            /mid\s*=\s*[\w(]+\s*[+]\s*[\w)]+\s*(?:\/|\/\/)\s*2/,
         ];
-        if (halvingPats.some(p => p.test(body))) return 'logarithmic';
+        if (halvingPats.some(p => p.test(body))) {
+            return { type: 'logarithmic', isUncertain: false };
+        }
 
-        if (/(\w+)\s*=\s*\1\s*\*\s*\1/.test(body)) return 'loglog';
-        if (/(\w+)\s*\*\s*\1\s*</.test(header) || /(\w+)\s*\*\s*\1\s*</.test(body) || /sqrt/i.test(header) || /sqrt/i.test(body)) return 'sqrt';
+        // Doubling: i *= 2, i <<= 1, i = i * 2
+        const doublingPats = [
+            /\b\w+\s*(?:\*=|<<=)\s*\d+/,
+            /\b\w+\s*=\s*\w+\s*(?:\*|<<)\s*\d+/,
+            /\b\w+\s*=\s*\d+\s*\*\s*\w+/,
+        ];
+        if (doublingPats.some(p => p.test(body))) {
+            return { type: 'logarithmic', isUncertain: false };
+        }
 
-        return 'linear';
+        if (/(\w+)\s*=\s*\1\s*\*\s*\1/.test(body)) {
+            return { type: 'loglog', isUncertain: false };
+        }
+
+        if (/(\w+)\s*\*\s*\1\s*</.test(header) || /(\w+)\s*\*\s*\1\s*</.test(body) || /sqrt/i.test(header) || /sqrt/i.test(body)) {
+            return { type: 'sqrt', isUncertain: false };
+        }
+
+        // Constant while loop: e.g. while i < 10: i += 1
+        const constCondMatch = header.match(/\b\w+\s*(?:<|<=)\s*(\d+)/);
+        const linearStepMatch = body.match(/\b\w+\s*(?:\+\+|--|\+=|-=)\s*(\d*)/);
+        if (constCondMatch && linearStepMatch) {
+            return { type: 'constant', isUncertain: false };
+        }
+
+        // Standard linear iteration counter
+        const isLinearCounter = /\b\w+\s*(?:\+\+|--|\+=|-=)/.test(body);
+        if (isLinearCounter) {
+            return { type: 'linear', isUncertain: false };
+        }
+
+        // Opaque / uncertain while loop
+        const isOpaque = /\w+\s*\(/.test(header) || /\bTrue\b|\btrue\b|\b1\b/.test(header) || !/[<>]/.test(header);
+        if (isOpaque) {
+            return {
+                type: 'uncertain',
+                isUncertain: true,
+                assumption: `Loop iteration count could not be statically determined for "${header.trim()}". Assuming O(n) iterations.`,
+            };
+        }
+
+        return { type: 'linear', isUncertain: false };
     }
 
     _isConstantEarlyExit(body) {
@@ -596,29 +795,90 @@ class ComplexityAnalyzer {
         return true;
     }
 
-    _loopTreeComplexity(node, code) {
-        if (node.iterType === 'amortized-linear') {
-            return { n: 1, logn: 0, label: 'O(n)' };
+    /* ==================================================================
+       LOOP TREE COMPLEXITY CALCULATION
+       ================================================================== */
+
+    _loopTreeNodeComplexity(node, code) {
+        const assumptions = [];
+        if (node.assumption) {
+            assumptions.push(node.assumption);
         }
 
-        const self = this._iterTypeToComplexity(node.iterType);
-        if (node.children.length === 0) return self;
+        if (node.iterType === 'amortized-linear') {
+            return {
+                worst: { n: 1, logn: 0, label: 'O(n)' },
+                best: node.hasEarlyReturn ? C1 : { n: 1, logn: 0, label: 'O(n)' },
+                isUncertain: false,
+                assumptions,
+            };
+        }
 
+        const selfC = this._iterTypeToComplexity(node.iterType);
+        const isUncertain = node.iterType === 'uncertain';
+
+        if (node.children.length === 0) {
+            let bestC;
+            if (node.hasEarlyReturn || node.hasBreak) {
+                bestC = C1;
+            } else {
+                bestC = selfC;
+            }
+            return {
+                worst: selfC,
+                best: bestC,
+                isUncertain,
+                assumptions,
+            };
+        }
+
+        // Special combinations: linear outer + harmonic inner -> O(n log n)
         if (node.iterType === 'linear' &&
             node.children.length === 1 &&
             node.children[0].iterType === 'harmonic') {
-            return { n: 1, logn: 1, label: 'O(n log n)' };
+            const combinedWorst = { n: 1, logn: 1, label: 'O(n log n)' };
+            const combinedBest = node.hasEarlyReturn ? C1 : combinedWorst;
+            return { worst: combinedWorst, best: combinedBest, isUncertain: false, assumptions };
         }
 
+        // sqrt outer + harmonic inner -> O(n log log n)
         if (node.iterType === 'sqrt' &&
             node.children.length === 1 &&
             node.children[0].iterType === 'harmonic') {
-            return { loglogn: 1, n: 1, label: 'O(n log log n)' };
+            const combinedWorst = { loglogn: 1, n: 1, label: 'O(n log log n)' };
+            const combinedBest = node.hasEarlyReturn ? C1 : combinedWorst;
+            return { worst: combinedWorst, best: combinedBest, isUncertain: false, assumptions };
         }
 
-        const childComplexities = node.children.map(c => this._loopTreeComplexity(c, code));
-        const maxChild = childComplexities.reduce((a, b) => this._maxC(a, b), C1);
-        return this._multiplyC(self, maxChild);
+        const childResults = node.children.map(c => this._loopTreeNodeComplexity(c, code));
+        const maxChildWorst = childResults.map(r => r.worst).reduce((a, b) => this._maxC(a, b), C1);
+        const maxChildBest = childResults.map(r => r.best).reduce((a, b) => this._maxC(a, b), C1);
+        const anyChildUncertain = childResults.some(r => r.isUncertain);
+
+        for (const cr of childResults) {
+            if (cr.assumptions) assumptions.push(...cr.assumptions);
+        }
+
+        const worst = this._multiplyC(selfC, maxChildWorst);
+
+        let best;
+        if (node.hasEarlyReturn) {
+            // Function returns immediately on the first iteration
+            best = C1;
+        } else if (node.hasBreak) {
+            // Loop terminates after 1 iteration in best case
+            best = this._multiplyC(C1, maxChildBest);
+        } else {
+            // Unconditional execution: all iterations must run
+            best = this._multiplyC(selfC, maxChildBest);
+        }
+
+        return {
+            worst,
+            best,
+            isUncertain: isUncertain || anyChildUncertain,
+            assumptions,
+        };
     }
 
     _iterTypeToComplexity(type) {
@@ -630,6 +890,7 @@ class ComplexityAnalyzer {
             case 'linear':           return { n: 1, logn: 0, label: 'O(n)' };
             case 'harmonic':         return { n: 1, logn: 0, label: 'O(n)' };
             case 'amortized-linear': return { n: 1, logn: 0, label: 'O(n)' };
+            case 'uncertain':        return { n: 1, logn: 0, label: 'O(n)' };
             default:                 return { n: 1, logn: 0, label: 'O(n)' };
         }
     }
@@ -645,6 +906,9 @@ class ComplexityAnalyzer {
             branchingFactor: 1,
             hasMemoization: false,
             functionName: null,
+            hasSliceCopy: false,
+            isUncertain: false,
+            assumptions: [],
         };
 
         const memoSignals = [
@@ -665,16 +929,24 @@ class ComplexityAnalyzer {
             result.functionName = fn.name;
             result.hasMemoization = hasMemo;
 
-            result.branchingFactor = this._countBranches(fn.body, fn.name);
-
             const body = fn.body;
-            const halvesInput = /[\w()]+\s*\/\s*2|[\w()]+\s*>>\s*1|\bmid\b|\.size\(\)\s*\/\s*2|len\s*\(\s*\w+\s*\)\s*\/\s*2|\bpartition\b|\bpi\b|\bpivot\b/.test(body);
+            const branchAnalysis = this._countBranches(body, fn.name);
+            result.branchingFactor = branchAnalysis.branchingFactor;
 
-            const hasLoopWithRecCall = new RegExp(`\\bfor\\b[\\s\\S]*?\\b${fn.name}\\s*\\([\\s\\S]*?\\}`).test(body);
+            const halvesInput = /[\w()]+\s*(?:\/|\/\/)\s*2|[\w()]+\s*>>\s*1|\bmid\b|\.size\(\)\s*\/\s*2|len\s*\(\s*\w+\s*\)\s*(?:\/|\/\/)\s*2|\bpartition\b|\bpi\b|\bpivot\b/.test(body);
+            const hasLoopWithRecCall = new RegExp(`(?:for|while)[\\s\\S]*?\\b${fn.name}\\s*\\(`).test(body);
+
+            // Python list slice check: e.g. fn(items[1:]) or fn(arr[:mid])
+            const hasSliceInCall = isPython && new RegExp(`\\b${fn.name}\\s*\\([^)]*\\[\\s*\\d*\\s*:\\s*[^)]*\\)`).test(body);
 
             if (hasLoopWithRecCall) {
                 result.branchingFactor = 2;
                 result.recursionType = 'branching';
+            } else if (hasSliceInCall && !halvesInput && result.branchingFactor <= 1) {
+                // Python recursive sum with slicing items[1:] -> O(n²) time, O(n²) space
+                result.hasSliceCopy = true;
+                result.recursionType = 'linear-slice-copy';
+                result.branchingFactor = 1;
             } else if (result.branchingFactor >= 2 && halvesInput) {
                 result.recursionType = 'divide-and-conquer';
             } else if (result.branchingFactor >= 2 && hasMemo) {
@@ -694,38 +966,37 @@ class ComplexityAnalyzer {
 
     _countBranches(body, fnName) {
         const re = new RegExp(`\\b${fnName}\\s*\\(`, 'g');
-        let m;
-        const callOffsets = [];
-        while ((m = re.exec(body)) !== null) {
-            callOffsets.push(m.index);
+        const matches = body.match(re) || [];
+        if (matches.length <= 1) {
+            return { branchingFactor: matches.length, isMutuallyExclusive: true };
         }
-        if (callOffsets.length <= 1) return callOffsets.length;
 
-        const stmts = body.split(/[;{}]/);
-        let maxInOneStmt = 0;
+        // Check if multiple calls appear in the same statement or expression
+        const stmts = body.split(/[;{}\n]/).map(s => s.trim()).filter(Boolean);
         for (const s of stmts) {
-            const matches = s.match(re);
-            if (matches) maxInOneStmt = Math.max(maxInOneStmt, matches.length);
-        }
-        if (maxInOneStmt >= 2) return maxInOneStmt;
-
-        let nonReturnCalls = 0;
-        for (const offset of callOffsets) {
-            const textBefore = body.substring(0, offset);
-            const lastBoundary = Math.max(
-                textBefore.lastIndexOf(';'),
-                textBefore.lastIndexOf('{'),
-                textBefore.lastIndexOf('}'),
-                textBefore.lastIndexOf('\n')
-            );
-            const stmtBefore = textBefore.substring(lastBoundary + 1).trim();
-            if (!/\breturn\b/.test(stmtBefore)) {
-                nonReturnCalls++;
+            const lineMatches = s.match(new RegExp(`\\b${fnName}\\s*\\(`, 'g')) || [];
+            if (lineMatches.length >= 2) {
+                return { branchingFactor: lineMatches.length, isMutuallyExclusive: false };
             }
         }
-        if (nonReturnCalls >= 2) return nonReturnCalls;
 
-        return 1;
+        // Check if call is in a loop
+        const inLoop = new RegExp(`(?:for|while)[\\s\\S]*?\\b${fnName}\\s*\\(`).test(body);
+        if (inLoop) {
+            return { branchingFactor: 2, isMutuallyExclusive: false };
+        }
+
+        // Check if all calls are guarded by return (mutually exclusive paths)
+        const callStmts = stmts.filter(s => new RegExp(`\\b${fnName}\\s*\\(`).test(s));
+        const allReturning = callStmts.every(s => /\breturn\b/.test(s));
+
+        // If all calls return, check if they are in mutually exclusive branches
+        if (allReturning) {
+            return { branchingFactor: 1, isMutuallyExclusive: true };
+        }
+
+        // Sequential non-return calls (e.g. mergeSort(l, m); mergeSort(m+1, r);)
+        return { branchingFactor: Math.min(callStmts.length, 2), isMutuallyExclusive: false };
     }
 
     /* ==================================================================
@@ -800,26 +1071,34 @@ class ComplexityAnalyzer {
         };
     }
 
-    _analyzeLibraryCalls(code, loopInfo) {
+    _analyzeLibraryCalls(code, loopInfo, isPython) {
         const result = { costs: [], maxLoopBodyCost: C1 };
 
         const lines = code.split('\n');
         let loopDepth = 0;
         for (const line of lines) {
             const t = line.trim();
-            if (/\b(for\s*\(|while\s*\(|do\b)/.test(t) || /\.(forEach|map|filter|reduce)\s*\(/.test(t)) {
+            if (/\b(for\s*\(|while\s*\(|do\b)/.test(t) || /\bfor\s+\w+\s+in\b/.test(t) || /\.(forEach|map|filter|reduce)\s*\(/.test(t)) {
                 loopDepth++;
             }
 
             if (loopDepth > 0) {
+                // Vector erase / insert
                 if (/\.erase\s*\(/.test(t) || /\.insert\s*\(\s*\w+\.begin\s*\(\)/.test(t)) {
                     result.costs.push({ op: 'vector.erase/insert', cost: 'O(n)', line: t });
                     result.maxLoopBodyCost = this._maxC(result.maxLoopBodyCost, { n: 1 });
                 }
+                // String concatenation
                 if ((/\w+\s*=\s*\w+\s*\+/.test(t) || /\w+\s*\+=/.test(t)) && /string|str\b/i.test(code)) {
                     result.costs.push({ op: 'string concat', cost: 'O(n)', line: t });
                     result.maxLoopBodyCost = this._maxC(result.maxLoopBodyCost, { n: 1 });
                 }
+                // Python list slicing in loop: arr[i:] or items[1:]
+                if (isPython && /\[\s*[^:\]]*:[^\]]*\]/.test(t)) {
+                    result.costs.push({ op: 'list slicing (Python copy)', cost: 'O(n)', line: t });
+                    result.maxLoopBodyCost = this._maxC(result.maxLoopBodyCost, { n: 1 });
+                }
+                // Map/set logarithmic ops
                 if (/\bmap\s*</.test(code) || /\bset\s*</.test(code)) {
                     if (/\.\s*(?:insert|find|erase|count|lower_bound|upper_bound)\s*\(/.test(t) ||
                         /\[\s*\w/.test(t)) {
@@ -887,14 +1166,17 @@ class ComplexityAnalyzer {
        DETERMINE TIME COMPLEXITY
        ================================================================== */
 
-    _determineTime(loops, rec, ds, lib, sort) {
+    _determineTime(loops, rec, ds, lib, sort, code, isPython) {
         let tc = C1;
         let best = C1;
         let worst = C1;
+        let average = C1;
+        let isUncertain = false;
+        const assumptions = [];
 
         const nothingFound = loops.totalLoops === 0 && !rec.isRecursive && !sort.hasSorting;
         if (nothingFound) {
-            return { notation: 'O(1)', bestCase: 'O(1)', worstCase: 'O(1)', averageCase: 'O(1)' };
+            return { notation: 'O(1)', bestCase: 'O(1)', worstCase: 'O(1)', averageCase: 'O(1)', isUncertain: false, assumptions: [] };
         }
 
         if (ds.usesGraph && (ds.usesQueue || ds.usesStack || ds.usesSet || ds.usesHashMap)) {
@@ -903,57 +1185,84 @@ class ComplexityAnalyzer {
                 bestCase: 'O(1)',
                 worstCase: 'O(V + E)',
                 averageCase: 'O(V + E)',
+                isUncertain: false,
+                assumptions: [],
             };
         }
 
+        // Recursion Handling
         if (rec.isRecursive) {
             const rt = rec.recursionType;
             const b  = rec.branchingFactor;
 
-            if (rt === 'branching') {
-                tc = worst = best = { n: 0, exp: b, label: `O(${b}^n)` };
+            if (rt === 'linear-slice-copy') {
+                // In Python, slicing a list in linear recursion: O(n²) time
+                tc = worst = average = { n: 2, logn: 0, label: 'O(n²)' };
+                best = C1;
+            } else if (rt === 'branching') {
+                tc = worst = average = { n: 0, exp: b, label: `O(${b}^n)` };
+                best = C1;
             } else if (rt === 'memoized-branching') {
-                tc = worst = { n: 1, logn: 0, label: 'O(n)' };
+                tc = worst = average = { n: 1, logn: 0, label: 'O(n)' };
                 best = C1;
             } else if (rt === 'divide-and-conquer') {
                 if (b >= 2) {
-                    tc = best = worst = { n: 1, logn: 1, label: 'O(n log n)' };
+                    // Merge sort unconditionally splits and merges all elements
+                    tc = best = worst = average = { n: 1, logn: 1, label: 'O(n log n)' };
                 } else {
-                    tc = worst = { n: 0, logn: 1, label: 'O(log n)' };
+                    // Binary search makes 1 recursive call per step: O(log n), best O(1)
+                    tc = worst = average = { n: 0, logn: 1, label: 'O(log n)' };
                     best = C1;
                 }
             } else {
-                tc = worst = { n: 1, logn: 0, label: 'O(n)' };
+                tc = worst = average = { n: 1, logn: 0, label: 'O(n)' };
                 best = C1;
             }
         }
 
-        if (loops.combinedComplexity) {
-            const lc = loops.combinedComplexity;
-            const withLib = this._multiplyC(lc, lib.maxLoopBodyCost);
+        // Loops Handling
+        if (loops.totalLoops > 0) {
+            const lcWorst = this._multiplyC(loops.combinedWorst || C1, lib.maxLoopBodyCost);
+            const lcBest  = loops.combinedBest || C1;
+            const lcAvg   = lcWorst;
+
+            if (loops.isUncertain) {
+                isUncertain = true;
+                if (loops.assumptions) assumptions.push(...loops.assumptions);
+            }
 
             if (rec.isRecursive && rec.recursionType === 'divide-and-conquer' && rec.branchingFactor >= 2) {
-                tc = worst = { n: 1, logn: 1, label: 'O(n log n)' };
+                // Divide-and-conquer sorting dominates loop merge steps
+                tc = best = worst = average = { n: 1, logn: 1, label: 'O(n log n)' };
+            } else if (!rec.isRecursive) {
+                tc      = lcWorst;
+                worst   = lcWorst;
+                best    = lcBest;
+                average = lcAvg;
             } else {
-                tc    = this._maxC(tc, withLib);
-                worst = this._maxC(worst, withLib);
-                best  = this._maxC(best, C1);
+                tc      = this._maxC(tc, lcWorst);
+                worst   = this._maxC(worst, lcWorst);
+                best    = this._maxC(best, lcBest);
+                average = this._maxC(average, lcAvg);
             }
         }
 
+        // Sorting Handling
         if (sort.hasSorting) {
             if (sort.sortInsideLoop) {
                 const sortInLoop = this._multiplyC(
                     loops.combinedComplexity || { n: 1 },
                     { n: 1, logn: 1 }
                 );
-                tc    = this._maxC(tc, sortInLoop);
-                worst = this._maxC(worst, sortInLoop);
+                tc      = this._maxC(tc, sortInLoop);
+                worst   = this._maxC(worst, sortInLoop);
+                average = this._maxC(average, sortInLoop);
             } else {
                 const nlogn = { n: 1, logn: 1, label: 'O(n log n)' };
-                tc    = this._maxC(tc, nlogn);
-                worst = this._maxC(worst, nlogn);
-                best  = this._maxC(best, { n: 1, logn: 0 });
+                tc      = this._maxC(tc, nlogn);
+                worst   = this._maxC(worst, nlogn);
+                average = this._maxC(average, nlogn);
+                best    = this._maxC(best, { n: 1, logn: 0 });
             }
         }
 
@@ -961,7 +1270,9 @@ class ComplexityAnalyzer {
             notation:    this._cToString(tc),
             bestCase:    this._cToString(best),
             worstCase:   this._cToString(worst),
-            averageCase: this._cToString(tc),
+            averageCase: this._cToString(average),
+            isUncertain,
+            assumptions,
         };
     }
 
@@ -969,9 +1280,12 @@ class ComplexityAnalyzer {
        DETERMINE SPACE COMPLEXITY
        ================================================================== */
 
-    _determineSpace(code, loops, rec, ds) {
+    _determineSpace(code, loops, rec, ds, isPython) {
         let sp = C1;
+        let isUncertain = false;
+        const assumptions = [];
 
+        // Linear array/vector allocations
         const linearAlloc = [
             /\bvector\s*<[^>]*>\s*\w+\s*\(\s*\w/,
             /\bnew\s+(?:int|long|bool|char|String|double)\s*\[/,
@@ -986,7 +1300,7 @@ class ComplexityAnalyzer {
             sp = this._maxC(sp, { n: 1 });
         }
 
-        if (ds.usesHashMap || ds.usesSet || ds.usesOrderedMap || ds.usesOrderedSet) {
+        if (ds.usesHashMap || ds.usesSet || ds.usesOrderedMap || ds.usesOrderedSet || ds.usesHeap || ds.usesQueue || ds.usesStack) {
             sp = this._maxC(sp, { n: 1 });
         }
 
@@ -994,6 +1308,7 @@ class ComplexityAnalyzer {
             sp = this._maxC(sp, { n: 1 });
         }
 
+        // 2D Matrix Allocations
         const twoDAlloc = [
             /vector\s*<\s*vector\s*<[^>]+>\s*>\s*\w+\s*\(/,
             /\bdp\s*\[\s*\w+\s*\]\s*\[\s*\w+\s*\]\s*=/,
@@ -1004,9 +1319,19 @@ class ComplexityAnalyzer {
             sp = this._maxC(sp, { n: 2 });
         }
 
+        // Recursion Space
         if (rec.isRecursive) {
-            if (rec.recursionType === 'divide-and-conquer') {
-                sp = this._maxC(sp, { n: 0, logn: 1 });
+            if (rec.recursionType === 'linear-slice-copy') {
+                // In Python, list slicing creates a new list copy at each call stack frame: O(n²) space
+                sp = this._maxC(sp, { n: 2, logn: 0, label: 'O(n²)' });
+            } else if (rec.recursionType === 'divide-and-conquer') {
+                if (rec.branchingFactor >= 2) {
+                    // Merge sort uses O(n) auxiliary space for temporary lists/buffers
+                    sp = this._maxC(sp, { n: 1, logn: 0, label: 'O(n)' });
+                } else {
+                    // Binary search uses O(log n) call stack frames
+                    sp = this._maxC(sp, { n: 0, logn: 1, label: 'O(log n)' });
+                }
             } else if (rec.recursionType === 'memoized-branching') {
                 sp = this._maxC(sp, { n: 1 });
             } else if (rec.recursionType === 'branching') {
@@ -1016,6 +1341,7 @@ class ComplexityAnalyzer {
             }
         }
 
+        // String append in loops
         if (/\bstring\b/i.test(code) || /\bstr\b/.test(code)) {
             let inLoop = false;
             for (const line of code.split('\n')) {
@@ -1028,7 +1354,7 @@ class ComplexityAnalyzer {
             }
         }
 
-        return { notation: this._cToString(sp) };
+        return { notation: this._cToString(sp), isUncertain, assumptions };
     }
 
     /* ==================================================================
@@ -1135,7 +1461,7 @@ class ComplexityAnalyzer {
        EXPLANATION
        ================================================================== */
 
-    _buildExplanation(loops, rec, ds, lib, sort, tc) {
+    _buildExplanation(loops, rec, ds, lib, sort, tc, space) {
         const points = [];
 
         if (loops.totalLoops === 0 && !rec.isRecursive && !sort.hasSorting) {
@@ -1149,15 +1475,25 @@ class ComplexityAnalyzer {
             for (const t of types) {
                 const count = loops.loopTypes.filter(l => l.type === t).length;
                 const desc = {
-                    'linear':           'iterates linearly — O(n) each',
-                    'logarithmic':      'halves search space — O(log n) each',
+                    'constant':         'constant iterations (e.g., fixed range/bound) — O(1) each',
+                    'linear':           'iterates linearly with input size — O(n) each',
+                    'logarithmic':      'doubles or halves counter/search space — O(log n) each',
                     'loglog':           'squares the iterator — O(log log n) each',
                     'sqrt':             'runs up to √n iterations each',
                     'harmonic':         'harmonic step (j += i) — combined with outer gives O(n log n)',
                     'amortized-linear': 'two-pointer / amortized — O(n) total across all outer iterations',
-                    'constant':         'exits in constant time (early return / break)',
+                    'uncertain':        'termination condition cannot be proven statically — estimated as O(n)',
                 }[t] || `${t}`;
                 points.push(`${count} loop(s): ${desc}.`);
+            }
+
+            const earlyReturns = loops.loopTypes.filter(l => l.hasEarlyReturn).length;
+            if (earlyReturns > 0) {
+                points.push(`Early exit / return condition detected inside loop — best-case time is O(1) when target is found immediately.`);
+            } else if (loops.maxNestingDepth > 1 && !loops.loopTypes.some(l => l.hasEarlyReturn)) {
+                points.push(`Nested loops execute unconditionally without early return — best-case time matches worst-case ${tc.bestCase}.`);
+            } else if (loops.totalLoops > 0 && !loops.loopTypes.some(l => l.hasEarlyReturn)) {
+                points.push(`Loop executes unconditionally without early return — best-case time matches worst-case ${tc.bestCase}.`);
             }
         }
 
@@ -1169,14 +1505,21 @@ class ComplexityAnalyzer {
 
         if (rec.isRecursive) {
             points.push(`Recursive function "${rec.functionName}" detected.`);
-            if (rec.recursionType === 'branching') {
-                points.push(`Branches into ${rec.branchingFactor} recursive calls → exponential O(${rec.branchingFactor}^n).`);
+            if (rec.recursionType === 'linear-slice-copy') {
+                points.push('In Python, list slicing (e.g. items[1:]) creates an O(n) copy at each call. Across n recursive calls, this increases total time complexity to O(n²) and auxiliary space to O(n²).');
+            } else if (rec.recursionType === 'branching') {
+                points.push(`Branches into ${rec.branchingFactor} concurrent recursive calls → exponential O(${rec.branchingFactor}^n).`);
             } else if (rec.recursionType === 'memoized-branching') {
                 points.push('Memoization detected — exponential branching reduced to O(n).');
             } else if (rec.recursionType === 'divide-and-conquer') {
-                points.push(`Divide-and-conquer: ${rec.branchingFactor} branch(es) halving input → Master Theorem applies.`);
+                if (rec.branchingFactor >= 2) {
+                    points.push(`Divide-and-conquer: 2 recursive branches halving input with linear merge step → O(n log n) time.`);
+                    points.push(`Auxiliary space: Merge sort requires O(n) temporary space for merged subarrays in addition to O(log n) stack frames.`);
+                } else {
+                    points.push('Divide-and-conquer: Mutually exclusive branch halving search space (e.g., binary search) → O(log n) time, O(1) best case, O(log n) stack space.');
+                }
             } else {
-                points.push('Linear recursion — each call reduces the problem by a constant.');
+                points.push('Linear recursion — each call reduces the problem size by a constant amount.');
             }
         }
 
@@ -1228,8 +1571,6 @@ class ComplexityAnalyzer {
         }
         return tips;
     }
-
-    _buildPatterns() { return {}; }
 }
 
 const C1 = Object.freeze({ n: 0, logn: 0, label: 'O(1)' });

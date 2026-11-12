@@ -609,6 +609,12 @@ body {
     border: 1px solid rgba(253, 121, 168, 0.3);
 }
 
+.badge-uncertain {
+    background: rgba(253, 203, 110, 0.2);
+    color: #fdcb6e;
+    border: 1px solid rgba(253, 203, 110, 0.45);
+}
+
 .result-details {
     display: flex;
     gap: 12px;
