@@ -8,7 +8,14 @@
 
     const analyzer = new ComplexityAnalyzer();
 
-    const runner = new CodeRunner();
+    let runner = null;
+    try {
+        if (typeof CodeRunner !== 'undefined') {
+            runner = new CodeRunner();
+        }
+    } catch (e) {
+        console.error('Failed to initialize CodeRunner:', e);
+    }
 
     // ==================== DOM References ====================
     const $ = (sel) => document.querySelector(sel);
@@ -119,12 +126,14 @@
     // ==================== Template & Language Select ====================
     templateBtn.addEventListener('click', () => {
         const lang = languageSelect.value === 'auto' ? 'python' : languageSelect.value;
-        const template = runner.getTemplate(lang);
-        codeInput.value = template;
-        updateEditorMeta();
-        showToast(`Loaded ${lang.toUpperCase()} runnable template!`);
-        if (liveToggle.checked) {
-            triggerLiveAnalysis();
+        const template = runner ? runner.getTemplate(lang) : '';
+        if (template) {
+            codeInput.value = template;
+            updateEditorMeta();
+            showToast(`Loaded ${lang.toUpperCase()} runnable template!`);
+            if (liveToggle.checked) {
+                triggerLiveAnalysis();
+            }
         }
     });
 
@@ -434,6 +443,11 @@
         const code = codeInput.value.trim();
         if (!code) {
             showToast('Please write or paste some code first!');
+            return;
+        }
+
+        if (!runner) {
+            showToast('Execution engine is initializing or unavailable.');
             return;
         }
 
@@ -1186,7 +1200,7 @@ int getValue(unordered_map<string, int>& map, string key) {
     updateEditorMeta();
 
     // Pre-warm Pyodide WebAssembly runtime in background
-    if (typeof loadPyodide !== 'undefined') {
+    if (runner && typeof loadPyodide !== 'undefined') {
         runner._pyodidePromise = loadPyodide({
             indexURL: "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/"
         }).catch(err => {

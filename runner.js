@@ -460,20 +460,6 @@ fn main() {
                 }
             }
         }
-                    stdout: stdout,
-                    stderr: stderr,
-                    compilerError: finalCompilerErr,
-                    exitCode: exitStatus !== undefined ? exitStatus : (isSuccess ? 0 : 1),
-                    durationMs: duration,
-                    isLocal: false
-                };
-            } catch (err) {
-                lastError = err;
-                if (attempt < retries) {
-                    await new Promise(r => setTimeout(r, 1000));
-                }
-            }
-        }
 
         const duration = Math.round(performance.now() - startTime);
         let errorMsg = lastError ? lastError.message : 'Unknown execution failure';
