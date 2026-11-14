@@ -60,41 +60,44 @@ html[data-theme="light"] {
 
 /* Dark */
 html[data-theme="dark"] {
-    --bg: #0b0e13;
-    --bg-elev: #12161d;
-    --bg-sunken: #0e1219;
-    --bg-hover: #171c25;
+    /* Softer charcoal rather than near-black — easier on the eyes for long
+       sessions, and the elevation steps stay distinguishable at low brightness. */
+    --bg: #15181e;
+    --bg-elev: #1b1f27;
+    --bg-sunken: #111418;
+    --bg-hover: #232830;
 
-    --border: #232a35;
-    --border-strong: #333c4a;
+    --border: #2b3139;
+    --border-strong: #3b434e;
 
-    --text: #e9edf4;
-    --text-2: #a7b1c0;
-    --text-3: #8590a1;
+    --text: #e9ecf1;
+    --text-2: #aab4c0;
+    --text-3: #8892a0;
 
-    --accent: #2fd4c1;
-    --accent-hover: #55e3d3;
-    --accent-soft: rgba(47, 212, 193, .12);
-    --accent-border: rgba(47, 212, 193, .35);
+    --accent: #35d6c2;
+    --accent-hover: #5ce6d4;
+    --accent-soft: rgba(53, 214, 194, .13);
+    --accent-border: rgba(53, 214, 194, .36);
 
-    --ok: #45d18b;
-    --ok-soft: rgba(69, 209, 139, .12);
-    --warn: #f2b354;
-    --warn-soft: rgba(242, 179, 84, .12);
-    --err: #ff7b6b;
-    --err-soft: rgba(255, 123, 107, .12);
+    --ok: #4bd492;
+    --ok-soft: rgba(75, 212, 146, .13);
+    --warn: #f0b45c;
+    --warn-soft: rgba(240, 180, 92, .13);
+    --err: #ff8372;
+    --err-soft: rgba(255, 131, 114, .13);
 
-    --shadow-xs: 0 1px 2px rgba(0, 0, 0, .4);
-    --shadow-sm: 0 1px 3px rgba(0, 0, 0, .45);
-    --shadow-md: 0 8px 24px -10px rgba(0, 0, 0, .7);
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, .32);
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, .38);
+    --shadow-md: 0 10px 28px -12px rgba(0, 0, 0, .6);
 
-    --grid-line: rgba(255, 255, 255, .035);
+    --grid-line: rgba(255, 255, 255, .028);
 
-    --term-bg: #080b0f;
-    --term-border: #1c222b;
-    --term-text: #cfd6e0;
-    --term-dim: #6b7787;
+    --term-bg: #0f1217;
+    --term-border: #262c35;
+    --term-text: #ccd4de;
+    --term-dim: #6f7a89;
 }
+
 
 /* ---------- Reset ---------- */
 *, *::before, *::after { box-sizing: border-box; }

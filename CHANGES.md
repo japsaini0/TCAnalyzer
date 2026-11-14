@@ -7,7 +7,7 @@ drop it straight into the repo — nothing is missing.
 
 | | Before | Now |
 |---|---|---|
-| Theme | Neon purple/pink glassmorphism on black, particle canvas | **Light-first, low-chrome devtool look** with an optional dark theme. Teal accent, hairline borders, subtle grid backdrop, no particles |
+| Theme | Neon purple/pink glassmorphism on black, particle canvas | **Dark-first charcoal** (`#15181e`, not near-black — easier on the eyes), teal accent, hairline borders, subtle grid backdrop, no particles. Light theme still available via the toggle |
 | Layout | Two floating glass panels, cramped controls | **Workspace layout**: editor card (with real console docked under it) + complexity card. Full-width history rows |
 | Typography | Inter everywhere, emoji-heavy headers | Inter for UI, **JetBrains Mono** for all code/metrics, sentence-case labels, uppercase micro-labels |
 | Editor | Font-size mismatch between gutter & code, gutter never scrolled | Shared metrics, **synced scrolling**, line numbers actually line up (0px drift, verified at 1440px & 390px) |
@@ -80,6 +80,33 @@ Screenshots are in `screenshots/`.
 
 ---
 
+## Post-launch verification fixes (14 Nov 2026)
+
+Found by re-testing the deployed site with an 87-assertion engine harness, a 76-check UI
+suite, a Python suite and live Wandbox timing. **These are the files that differ from what
+is currently deployed** — deploy `analyzer.js`, `runner.js` and `app.js` to pick them up.
+
+| # | Bug | Symptom on the live site | Fix |
+|---|---|---|---|
+| 1 | Go `for i := range a` scored **O(1)** | The engine reports a constant-time loop. `range` is the canonical Go loop, so a large share of real Go answers were silently wrong | `for … {` headers may contain `(` `)` `&` `:` `,`; `for … in` / `range` takes the brace branch; `range` classified linear |
+| 2 | Rust `for x in v.iter()` scored **O(1)** | Same silent wrong answer for the canonical Rust loop (also `for x in &v`) | Same regex + branch fix |
+| 3 | Remote compiler budget was a flat **20 s** | Go and Rust **never ran**: Wandbox needs 26–34 s for Go and up to 93 s for Rust. Every attempt printed *"No response after 20s"* | `REMOTE_TIMEOUT` 20 s → **90 s**, with a live elapsed-time hint after 6 s |
+| 4 | A timeout **retried** the whole request | Users waited **40.8 s** (2 × 20 s) to be told it failed | No retry once the budget is spent — fail fast with a clear message |
+| 5 | `abort('reason')` defeated the abort check | `fetch` rejects with the raw string, not a `DOMException`, so `err.name === 'AbortError'` never matched — cancel *and* timeout both fell through into the retry path | Bare `abort()` + defensive `wasAbort` check |
+| 6 | No way to stop a run | A slow Rust compile locked the UI with no escape short of reloading | `runner.cancel()` + **Esc** handler; reports *"Run cancelled by you."* with `exitCode 130` |
+
+Verification after these fixes (local build, same tests that found them):
+
+| Area | Before | After |
+|---|---|---|
+| Engine suite | 86 / 87 | **87 / 87** |
+| Loop-form matrix | — | **19 / 19** |
+| Repo regression | 43 / 43 | **43 / 43** |
+| Remote languages (Go, Rust, Java, C, C++) | Go/Rust fail | **5 / 5** — go 33.9 s, rust 93.3 s, java 16.6 s, c 5.6 s, cpp 3.4 s |
+| Cancel / timeout determinism | — | **10 / 10** (Esc on a stubbed 60 s hang: exit 130, no stale output, immediate recovery) |
+
+---
+
 ## Files
 
 | File | Status |
@@ -88,7 +115,7 @@ Screenshots are in `screenshots/`.
 | `styles.css` | rewritten |
 | `app.js` | rewritten |
 | `runner.js` | rewritten |
-| `analyzer.js` | patched (7 targeted fixes, rest untouched) |
+| `analyzer.js` | patched (targeted fixes, rest untouched) |
 | `serve.js` | one-line change (`HOST`) |
 | `test_regression.js` | unchanged — still 43/43 passing |
 | `vercel.json` | **new** |
@@ -97,6 +124,6 @@ Screenshots are in `screenshots/`.
 
 ## Still open (needs decisions from you)
 
-1. **Deploy** — push these files; the production site still runs the old build.
+1. **Deploy the three JS files** — the new UI is already live, but `analyzer.js`, `runner.js` and `app.js` on the site are one revision behind. Deploying them fixes the Go/Rust `O(1)` verdicts, makes Go/Rust actually run, and enables Esc-to-cancel.
 2. **JS on Wandbox** — the "JavaScript" option runs in your browser. If you want real Node semantics (`require`, stdin via `fs`), route JS through Wandbox `nodejs-20.17.0` instead. One-line change if you want it.
 3. **CSP `'unsafe-eval'`** is required because the JS sandbox compiles user code. Moving to a non-eval runner isn't possible in-browser without a parser; the worker already isolates it.

@@ -14,7 +14,11 @@ class CodeRunner {
         // Wall-clock limits (ms). The old build advertised 18s but the only
         // timer it had was 16s and it never applied to local JS/Python at all.
         this.LOCAL_TIMEOUT = 5000;
-        this.REMOTE_TIMEOUT = 20000;
+        // Remote sandbox timings measured 14 Nov 2026: C/C++ ≈ 3-9s, Java ≈ 6-12s,
+        // Go ≈ 26-28s, Rust ≈ 20-30s. A flat 20s budget made Go/Rust fail with a
+        // false "sandbox busy" message even though the compile succeeded.
+        this.REMOTE_TIMEOUT = 90000;      // hard ceiling (Wandbox queues under load)
+        this.REMOTE_SLOW_AFTER = 6000;    // start reporting elapsed time after this
 
         this.pyodideVersion = 'v0.26.4';
         this.pyodideIndex = `https://cdn.jsdelivr.net/pyodide/${this.pyodideVersion}/full/`;
@@ -181,6 +185,14 @@ END FUNCTION
         };
     }
 
+    /** Abort an in-flight remote run (bound to Esc in the UI). */
+    cancel() {
+        this._cancelled = true;
+        if (this._activeAbort) {
+            try { this._activeAbort.abort(); } catch (_) {}   // no reason => AbortError
+        }
+    }
+
     /** Starter code for a language (falls back to Python). */
     getTemplate(language) {
         const lang = (language || '').toLowerCase();
@@ -235,7 +247,7 @@ END FUNCTION
         }
 
         // 4. Remote Wandbox
-        return this._runWandbox(code, normLang, stdin, startTime);
+        return this._runWandbox(code, normLang, stdin, startTime, onStatus);
     }
 
     /* ==================================================================
@@ -556,9 +568,11 @@ END FUNCTION
             .join('\n');
     }
 
-    async _runWandbox(code, language, stdin, startTime, retries = 2) {
+    async _runWandbox(code, language, stdin, startTime, onStatus = () => {}, retries = 2) {
         let compiler = this.compilers[language] || this.compilers.python;
         let lastError = null;
+        let timedOut = false;
+        let cancelled = false;
         const payloadCode = language === 'java' ? this._normalizeJava(code) : code;
 
         for (let attempt = 1; attempt <= retries; attempt++) {
@@ -568,7 +582,18 @@ END FUNCTION
                 }
 
                 const controller = new AbortController();
+                this._activeAbort = controller;
                 const timeoutId = setTimeout(() => controller.abort(), this.REMOTE_TIMEOUT);
+                let slowNote = null;
+                if (attempt === 1) {
+                    slowNote = setTimeout(() => {
+                        const started = performance.now();
+                        this._progressTimer = setInterval(() => {
+                            const secs = Math.round((performance.now() - started) / 1000) + this.REMOTE_SLOW_AFTER / 1000;
+                            onStatus(`${compiler}: still compiling in the remote sandbox… ${secs}s (Esc to cancel)`);
+                        }, 3000);
+                    }, this.REMOTE_SLOW_AFTER);
+                }
 
                 const payload = {
                     code: payloadCode,
@@ -584,6 +609,10 @@ END FUNCTION
                     signal: controller.signal,
                 });
                 clearTimeout(timeoutId);
+                if (slowNote) clearTimeout(slowNote);
+                clearInterval(this._progressTimer);
+                this._progressTimer = null;
+                this._activeAbort = null;
 
                 if (!response.ok) {
                     throw new Error(`Compiler service returned HTTP ${response.status}`);
@@ -625,11 +654,33 @@ END FUNCTION
                 });
             } catch (err) {
                 lastError = err;
+                if (this._progressTimer) { clearInterval(this._progressTimer); this._progressTimer = null; }
+                this._activeAbort = null;
+                // Never retry after an abort — either the user cancelled or the
+                // full budget was spent; retrying would just double the wait.
+                const wasAbort = err && (err.name === 'AbortError' || err === 'timeout' || err === 'user');
+                if (wasAbort) {
+                    cancelled = this._cancelled === true;
+                    timedOut = !cancelled;
+                    this._cancelled = false;
+                    break;
+                }
                 if (attempt < retries) await new Promise((r) => setTimeout(r, 800));
             }
         }
 
-        const timedOut = lastError && lastError.name === 'AbortError';
+        if (cancelled) {
+            return this._result({
+                success: false,
+                compiler,
+                language,
+                stderr: 'Cancelled',
+                compilerError: 'Run cancelled by you.',
+                exitCode: 130,
+                startTime,
+            });
+        }
+
         const message = timedOut
             ? `No response after ${this.REMOTE_TIMEOUT / 1000}s. The compiler sandbox may be busy — try again.`
             : (lastError ? lastError.message : 'Unknown execution failure');

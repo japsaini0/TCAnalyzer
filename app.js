@@ -120,14 +120,14 @@
         const next = theme === 'dark' ? 'dark' : 'light';
         document.documentElement.setAttribute('data-theme', next);
         const meta = document.querySelector('meta[name="theme-color"]');
-        if (meta) meta.setAttribute('content', next === 'dark' ? '#0b0e13' : '#ffffff');
+        if (meta) meta.setAttribute('content', next === 'dark' ? '#15181e' : '#ffffff');
         themeToggle.setAttribute('aria-pressed', String(next === 'dark'));
         themeToggle.setAttribute('aria-label', next === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
         store.set('tc_theme', next);
         if ($('#tab-learn').classList.contains('is-active')) drawChart();
     }
 
-    applyTheme(store.get('tc_theme', 'light'));
+    applyTheme(store.get('tc_theme', 'dark'));
 
     themeToggle.addEventListener('click', () => {
         const current = document.documentElement.getAttribute('data-theme');
@@ -585,6 +585,14 @@
     /* ================================================================
        Run
        ================================================================ */
+
+    // Esc cancels an in-flight run — remote sandboxes can queue for a minute.
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && isRunning && runner && typeof runner.cancel === 'function') {
+            runner.cancel();
+            toast('Cancelling run…');
+        }
+    });
 
     runBtn.addEventListener('click', () => runCode(false));
     runAnalyzeBtn.addEventListener('click', () => runCode(true));

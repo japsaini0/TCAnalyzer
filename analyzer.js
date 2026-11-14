@@ -403,7 +403,10 @@ class ComplexityAnalyzer {
 
     _buildCLoopTree(code) {
         // Matches C/C++/Java/JS for(...), Go for init; cond; update {, Go for cond {, while(...), do-while, HOFs
-        const loopRegex = /\b(for\s*\(|for\s+[^;{]+;[^;{]+;[^{]+\{|for\s+[a-zA-Z0-9_<>=! .]+\{|while\s*\(|while\s+[^{]+\{|do\b|\.(?:forEach|map|filter|reduce|flatMap)\s*\()/g;
+        // `for … {` must tolerate `(` `)` `&` `:` `,` etc. so that Rust
+        // (`for x in v.iter() {`, `for x in &v {`) and Go (`for i := range a {`)
+        // are recognised at all — they used to be missed and scored O(1).
+        const loopRegex = /\b(for\s*\(|for\s+[^;{]+;[^;{]+;[^{]+\{|for\s+[^{;}]*\{|while\s*\(|while\s+[^{]+\{|do\b|\.(?:forEach|map|filter|reduce|flatMap)\s*\()/g;
         const loops = [];
         let match;
         const doWhilePositions = new Set();
@@ -422,7 +425,13 @@ class ComplexityAnalyzer {
 
             if (matchStr.startsWith('for')) {
                 keyword = 'for';
-                if (code[match.index + 3] === '(' || code.indexOf('(', startIndex) < code.indexOf('{', startIndex) && code.indexOf('(', startIndex) !== -1) {
+                // Rust/Go style: `for x in expr {` / `for i := range a {` — the
+                // header runs up to the opening brace, so take the brace branch
+                // even though the expression may contain parentheses.
+                const bi = code.indexOf('{', startIndex);
+                const seg = bi === -1 ? '' : code.substring(match.index + 3, bi);
+                const isForIn = !seg.includes(';') && /(?:\bin\b|\brange\b)/.test(seg);
+                if (!isForIn && (code[match.index + 3] === '(' || code.indexOf('(', startIndex) < code.indexOf('{', startIndex) && code.indexOf('(', startIndex) !== -1)) {
                     const openParen = code.indexOf('(', startIndex);
                     const closeParen = this._findMatchingParen(code, openParen);
                     if (closeParen !== -1) {
@@ -716,6 +725,11 @@ class ComplexityAnalyzer {
         }
 
         if (/\bfor\s+[\w\s,()]+\s+in\b/.test(header) || /\bfor\s+[\w\s,()]+\s+of\b/.test(header)) {
+            return { type: 'linear', hasEarlyReturn, hasBreak, isUncertain: false };
+        }
+
+        // Go: `for i := range a`, `for k, v := range m`
+        if (/\brange\b/.test(header)) {
             return { type: 'linear', hasEarlyReturn, hasBreak, isUncertain: false };
         }
 
