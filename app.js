@@ -1,38 +1,79 @@
 /**
- * TC Analyzer — Application Logic
- * Handles UI interactions, tabs, examples, history, particles, and charts.
+ * TC Analyzer — application logic
+ *
+ * Flows: tabs · theme · editor · live analysis · execution · history · examples · guide
  */
 
 (function () {
     'use strict';
 
-    const analyzer = new ComplexityAnalyzer();
+    /* ================================================================
+       Dependencies
+       ================================================================ */
 
-    let runner = null;
-    try {
-        if (typeof CodeRunner !== 'undefined') {
-            runner = new CodeRunner();
-        }
-    } catch (e) {
-        console.error('Failed to initialize CodeRunner:', e);
+    const analyzer = new ComplexityAnalyzer();
+    const runner = typeof CodeRunner !== 'undefined' ? new CodeRunner() : null;
+
+    /* ================================================================
+       Tiny helpers
+       ================================================================ */
+
+    const $ = (sel) => document.querySelector(sel);
+    const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+    function esc(value) {
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 
-    // ==================== DOM References ====================
-    const $ = (sel) => document.querySelector(sel);
-    const $$ = (sel) => document.querySelectorAll(sel);
+    /** localStorage that can never throw or hand back corrupt data. */
+    const store = {
+        get(key, fallback) {
+            try {
+                const raw = localStorage.getItem(key);
+                if (raw == null) return fallback;
+                return JSON.parse(raw);
+            } catch (_) {
+                try { localStorage.removeItem(key); } catch (__) {}
+                return fallback;
+            }
+        },
+        set(key, value) {
+            try { localStorage.setItem(key, JSON.stringify(value)); } catch (_) {}
+        },
+        del(key) {
+            try { localStorage.removeItem(key); } catch (_) {}
+        },
+    };
+
+    const debounce = (fn, ms) => {
+        let t = null;
+        return (...args) => {
+            clearTimeout(t);
+            t = setTimeout(() => fn(...args), ms);
+        };
+    };
+
+    /* ================================================================
+       Elements
+       ================================================================ */
 
     const codeInput = $('#codeInput');
-    const lineNumbers = $('#lineNumbers');
-    const analyzeBtn = $('#analyzeBtn');
+    const gutter = $('#lineNumbers');
     const runBtn = $('#runBtn');
     const runAnalyzeBtn = $('#runAnalyzeBtn');
+    const analyzeBtn = $('#analyzeBtn');
     const liveToggle = $('#liveToggle');
     const templateBtn = $('#templateBtn');
-    const languageSelect = $('#languageSelect');
     const clearBtn = $('#clearBtn');
     const copyBtn = $('#copyBtn');
-    const copyResultBtn = $('#copyResultBtn');
+    const languageSelect = $('#languageSelect');
     const resultsBody = $('#resultsBody');
+    const copyResultBtn = $('#copyResultBtn');
     const charCount = $('#charCount');
     const lineCount = $('#lineCount');
     const queryCount = $('#queryCount');
@@ -42,1170 +83,1185 @@
     const clearHistoryBtn = $('#clearHistoryBtn');
     const examplesGrid = $('#examplesGrid');
     const learnGrid = $('#learnGrid');
-    const toast = $('#toast');
+    const chartLegend = $('#chartLegend');
 
-    // Terminal DOM
     const terminalOutput = $('#terminalOutput');
     const stdinInput = $('#stdinInput');
-    const termStatusDot = $('#termStatusDot');
-    const termMetaChip = $('#termMetaChip');
+    const statusDot = $('#termStatusDot');
+    const metaChip = $('#termMetaChip');
     const copyTermBtn = $('#copyTermBtn');
     const clearTermBtn = $('#clearTermBtn');
-    const termTabs = $$('.term-tab');
-    const termPaneOutput = $('#termPaneOutput');
-    const termPaneStdin = $('#termPaneStdin');
+    const consoleTabs = $$('.console-tab');
+    const paneOutput = $('#termPaneOutput');
+    const paneStdin = $('#termPaneStdin');
 
-    let totalQueries = parseInt(localStorage.getItem('tc_queries') || '0');
-    let history = JSON.parse(localStorage.getItem('tc_history') || '[]');
-    let lastExecutionMetrics = null;
-    let liveDebounceTimer = null;
+    /* ================================================================
+       State
+       ================================================================ */
 
-    // ==================== Theme ====================
-    const savedTheme = localStorage.getItem('tc_theme') || 'dark';
-    document.documentElement.setAttribute('data-theme', savedTheme);
-    updateThemeIcon();
+    let totalRuns = Number(store.get('tc_runs', 0));
+    if (!Number.isFinite(totalRuns) || totalRuns < 0) totalRuns = 0;
+
+    let history = store.get('tc_history', []);
+    if (!Array.isArray(history)) history = [];
+
+    let lastMetrics = null;
+    let isRunning = false;
+    let runSeq = 0;
+    let undoBuffer = null;
+
+    const DRAFT_KEY = 'tc_draft';
+
+    /* ================================================================
+       Theme
+       ================================================================ */
+
+    function applyTheme(theme) {
+        const next = theme === 'dark' ? 'dark' : 'light';
+        document.documentElement.setAttribute('data-theme', next);
+        const meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute('content', next === 'dark' ? '#0b0e13' : '#ffffff');
+        themeToggle.setAttribute('aria-pressed', String(next === 'dark'));
+        themeToggle.setAttribute('aria-label', next === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
+        store.set('tc_theme', next);
+        if ($('#tab-learn').classList.contains('is-active')) drawChart();
+    }
+
+    applyTheme(store.get('tc_theme', 'light'));
 
     themeToggle.addEventListener('click', () => {
         const current = document.documentElement.getAttribute('data-theme');
-        const next = current === 'dark' ? 'light' : 'dark';
-        document.documentElement.setAttribute('data-theme', next);
-        localStorage.setItem('tc_theme', next);
-        updateThemeIcon();
+        applyTheme(current === 'dark' ? 'light' : 'dark');
     });
 
-    function updateThemeIcon() {
-        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-        $('.theme-icon').textContent = isDark ? '🌙' : '☀️';
+    /* ================================================================
+       Toasts (queued — the old single timer cut messages off)
+       ================================================================ */
+
+    const toastStack = $('#toastStack');
+
+    function toast(message, kind = 'info') {
+        if (!toastStack) return;
+        while (toastStack.children.length >= 4) toastStack.firstElementChild.remove();
+
+        const node = document.createElement('div');
+        node.className = 'toast' + (kind === 'err' ? ' is-err' : kind === 'ok' ? ' is-ok' : '');
+        node.innerHTML = '<span class="toast-dot"></span><span></span>';
+        node.lastElementChild.textContent = message;
+        toastStack.appendChild(node);
+
+        setTimeout(() => {
+            node.classList.add('is-out');
+            setTimeout(() => node.remove(), 200);
+        }, 3200);
     }
 
-    // ==================== Tabs ====================
-    $$('.nav-btn').forEach(btn => {
+    /* ================================================================
+       Clipboard (awaits the promise, falls back for http://)
+       ================================================================ */
+
+    async function copyText(text, okMessage) {
+        if (!text || !text.trim()) {
+            toast('Nothing to copy yet', 'err');
+            return;
+        }
+        try {
+            if (navigator.clipboard && window.isSecureContext) {
+                await navigator.clipboard.writeText(text);
+            } else {
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                ta.remove();
+            }
+            toast(okMessage || 'Copied', 'ok');
+        } catch (_) {
+            toast('Clipboard blocked by the browser', 'err');
+        }
+    }
+
+    /* ================================================================
+       Tabs
+       ================================================================ */
+
+    $$('.tab-btn').forEach((btn) => {
         btn.addEventListener('click', () => {
-            $$('.nav-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            $$('.tab-content').forEach(t => t.classList.remove('active'));
-            $(`#tab-${btn.dataset.tab}`).classList.add('active');
+            $$('.tab-btn').forEach((b) => {
+                b.classList.remove('is-active');
+                b.setAttribute('aria-selected', 'false');
+            });
+            btn.classList.add('is-active');
+            btn.setAttribute('aria-selected', 'true');
+
+            $$('.tab-panel').forEach((p) => p.classList.remove('is-active'));
+            const panel = $(`#tab-${btn.dataset.tab}`);
+            if (panel) panel.classList.add('is-active');
 
             if (btn.dataset.tab === 'learn') {
-                setTimeout(drawComplexityChart, 100);
+                requestAnimationFrame(drawChart);
             }
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         });
     });
 
-    // ==================== Terminal Tabs & Controls ====================
-    termTabs.forEach(tab => {
-        tab.addEventListener('click', () => {
-            termTabs.forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
-            if (tab.dataset.termTab === 'output') {
-                termPaneOutput.classList.add('active');
-                termPaneStdin.classList.remove('active');
-            } else {
-                termPaneOutput.classList.remove('active');
-                termPaneStdin.classList.add('active');
-                stdinInput.focus();
-            }
+    /* ================================================================
+       Console tabs
+       ================================================================ */
+
+    function showConsoleTab(name) {
+        consoleTabs.forEach((t) => {
+            const active = t.dataset.termTab === name;
+            t.classList.toggle('is-active', active);
+            t.setAttribute('aria-selected', String(active));
         });
+        paneOutput.classList.toggle('is-active', name === 'output');
+        paneStdin.classList.toggle('is-active', name === 'stdin');
+        if (name === 'stdin') stdinInput.focus();
+    }
+
+    consoleTabs.forEach((tab) => {
+        tab.addEventListener('click', () => showConsoleTab(tab.dataset.termTab));
     });
 
-    clearTermBtn.addEventListener('click', () => {
-        terminalOutput.innerHTML = '<span class="term-dim">$ Terminal cleared. Ready for next execution.</span>';
-        termStatusDot.className = 'term-status-dot idle';
-        termMetaChip.style.display = 'none';
-        showToast('Terminal output cleared');
-    });
-
-    copyTermBtn.addEventListener('click', () => {
-        const text = terminalOutput.innerText;
+    function setStatus(state, text) {
+        statusDot.className = 'status-dot ' + (state === 'running' ? 'is-running' : state === 'ok' ? 'is-ok' : state === 'err' ? 'is-err' : 'is-idle');
         if (text) {
-            navigator.clipboard.writeText(text);
-            showToast('Terminal output copied!');
+            metaChip.hidden = false;
+            metaChip.className = 'console-chip ' + (state === 'ok' ? 'is-ok' : state === 'err' ? 'is-err' : 'is-running');
+            metaChip.textContent = text;
+        } else {
+            metaChip.hidden = true;
         }
-    });
+    }
 
-    // ==================== Template & Language Select ====================
-    templateBtn.addEventListener('click', () => {
-        const lang = languageSelect.value === 'auto' ? 'python' : languageSelect.value;
-        const template = runner ? runner.getTemplate(lang) : '';
-        if (template) {
-            codeInput.value = template;
-            updateEditorMeta();
-            showToast(`Loaded ${lang.toUpperCase()} runnable template!`);
-            if (liveToggle.checked) {
-                triggerLiveAnalysis();
-            }
-        }
-    });
+    /* ================================================================
+       Editor
+       ================================================================ */
 
-    languageSelect.addEventListener('change', () => {
-        if (liveToggle.checked && codeInput.value.trim()) {
-            triggerLiveAnalysis();
-        }
-    });
+    function updateMeta() {
+        const value = codeInput.value;
+        const lines = value.split('\n');
+        charCount.textContent = value.length;
+        lineCount.textContent = lines.length;
+        const word = document.querySelector('#lineWord');
+        if (word) word.textContent = lines.length === 1 ? 'line' : 'lines';
 
-    // ==================== Code Editor ====================
+        gutter.textContent = lines.map((_, i) => i + 1).join('\n');
+        gutter.scrollTop = codeInput.scrollTop;
+    }
+
     codeInput.addEventListener('input', () => {
-        updateEditorMeta();
-        if (liveToggle.checked) {
-            triggerLiveAnalysis();
-        }
+        undoBuffer = null;
+        updateMeta();
+        saveDraft();
+        if (liveToggle.checked) scheduleLive();
     });
 
     codeInput.addEventListener('scroll', () => {
-        lineNumbers.scrollTop = codeInput.scrollTop;
+        gutter.scrollTop = codeInput.scrollTop;
     });
 
-    // ==================== VS Code-Style Smart Code Editor ====================
-    const AUTO_PAIRS = {
-        '(': ')',
-        '[': ']',
-        '{': '}',
-        '"': '"',
-        "'": "'",
-        '`': '`'
-    };
-
-    function setupSmartCodeEditor(textarea) {
-        textarea.addEventListener('keydown', (e) => {
-            if (e.isComposing) return;
-
-            const start = textarea.selectionStart;
-            const end = textarea.selectionEnd;
-            const val = textarea.value;
-            const hasSelection = end > start;
-
-            // 1. Shortcut executions
-            // Ctrl+Shift+Enter: Run & Analyze
-            if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'Enter') {
-                e.preventDefault();
-                runCode(true);
-                return;
-            }
-
-            // Shift+Enter: Run Code
-            if (e.shiftKey && e.key === 'Enter') {
-                e.preventDefault();
-                runCode(false);
-                return;
-            }
-
-            // Ctrl+Enter: Analyze Complexity
-            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                e.preventDefault();
-                runAnalysis();
-                return;
-            }
-
-            // 2. Tab & Shift+Tab (Indentation)
-            if (e.key === 'Tab') {
-                e.preventDefault();
-                if (hasSelection && val.substring(start, end).includes('\n')) {
-                    // Multi-line indent / unindent
-                    const lineStart = val.lastIndexOf('\n', start - 1) + 1;
-                    const lineEnd = val.indexOf('\n', end);
-                    const effectiveEnd = lineEnd === -1 ? val.length : lineEnd;
-                    const selectedBlock = val.substring(lineStart, effectiveEnd);
-                    const lines = selectedBlock.split('\n');
-
-                    let modifiedLines;
-                    if (e.shiftKey) {
-                        modifiedLines = lines.map(line => line.replace(/^( {1,4}|\t)/, ''));
-                    } else {
-                        modifiedLines = lines.map(line => '    ' + line);
-                    }
-
-                    const replacement = modifiedLines.join('\n');
-                    textarea.setRangeText(replacement, lineStart, effectiveEnd, 'select');
-                } else if (e.shiftKey) {
-                    // Single-line unindent
-                    const lineStart = val.lastIndexOf('\n', start - 1) + 1;
-                    const linePrefix = val.substring(lineStart, start);
-                    const spacesToRemove = Math.min((linePrefix.match(/^[ ]*/) || [''])[0].length, 4);
-                    if (spacesToRemove > 0) {
-                        textarea.setRangeText('', lineStart, lineStart + spacesToRemove, 'end');
-                        textarea.selectionStart = textarea.selectionEnd = Math.max(lineStart, start - spacesToRemove);
-                    }
-                } else {
-                    // Insert 4 spaces
-                    insertText(textarea, '    ', start + 4);
-                }
-                updateEditorMeta();
-                if (liveToggle.checked) triggerLiveAnalysis();
-                return;
-            }
-
-            // 3. Auto-close opening brackets & quotes, or wrap selection
-            if (AUTO_PAIRS[e.key] && !e.ctrlKey && !e.metaKey && !e.altKey) {
-                const openChar = e.key;
-                const closeChar = AUTO_PAIRS[openChar];
-
-                // Case A: Selection wrapping (e.g. select text and press ( -> (text))
-                if (hasSelection) {
-                    e.preventDefault();
-                    const selectedText = val.substring(start, end);
-                    const wrapped = openChar + selectedText + closeChar;
-                    insertText(textarea, wrapped);
-                    textarea.selectionStart = start + 1;
-                    textarea.selectionEnd = end + 1;
-                    updateEditorMeta();
-                    if (liveToggle.checked) triggerLiveAnalysis();
-                    return;
-                }
-
-                // Case B: Quotes - do not auto-close if preceded by a word char (e.g. don't)
-                if (openChar === '"' || openChar === "'" || openChar === '`') {
-                    const prevChar = start > 0 ? val[start - 1] : '';
-                    const nextChar = val[start] || '';
-
-                    // If overtyping the same closing quote
-                    if (nextChar === openChar) {
-                        e.preventDefault();
-                        textarea.selectionStart = textarea.selectionEnd = start + 1;
-                        return;
-                    }
-
-                    // Word character before quote (e.g. don't)
-                    if (/\w/.test(prevChar)) {
-                        return;
-                    }
-
-                    // Only auto-close quote if at end of text, whitespace, or punctuation
-                    if (!nextChar || /[\s\)\}\],;\.\:]/.test(nextChar)) {
-                        e.preventDefault();
-                        insertText(textarea, openChar + closeChar);
-                        textarea.selectionStart = textarea.selectionEnd = start + 1;
-                        updateEditorMeta();
-                        if (liveToggle.checked) triggerLiveAnalysis();
-                        return;
-                    }
-                    return;
-                }
-
-                // Case C: Brackets ( (, [, { )
-                e.preventDefault();
-                insertText(textarea, openChar + closeChar);
-                textarea.selectionStart = textarea.selectionEnd = start + 1;
-                updateEditorMeta();
-                if (liveToggle.checked) triggerLiveAnalysis();
-                return;
-            }
-
-            // 4. Overtype closing character (step over ), ], }, etc. when already in front of cursor)
-            if ((')]}'.includes(e.key) || e.key === '"' || e.key === "'" || e.key === '`') && !e.ctrlKey && !e.metaKey && !e.altKey) {
-                if (!hasSelection && val[start] === e.key) {
-                    e.preventDefault();
-                    textarea.selectionStart = textarea.selectionEnd = start + 1;
-                    return;
-                }
-            }
-
-            // 5. Smart Backspace (delete matching empty pair at once)
-            if (e.key === 'Backspace' && !hasSelection && start > 0) {
-                const prevChar = val[start - 1];
-                const nextChar = val[start];
-                if (AUTO_PAIRS[prevChar] === nextChar) {
-                    e.preventDefault();
-                    deletePair(textarea, start - 1, start + 1);
-                    updateEditorMeta();
-                    if (liveToggle.checked) triggerLiveAnalysis();
-                    return;
-                }
-            }
-
-            // 6. Smart Enter (auto-indent & bracket expansion)
-            if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
-                const lineStart = val.lastIndexOf('\n', start - 1) + 1;
-                const currentLine = val.substring(lineStart, start);
-                const indentMatch = currentLine.match(/^[ \t]*/);
-                const currentIndent = indentMatch ? indentMatch[0] : '';
-                const prevChar = start > 0 ? val[start - 1] : '';
-                const nextChar = val[start] || '';
-
-                // Case A: Pressed Enter between matching braces/brackets ({|}, [|], (|))
-                if ((prevChar === '{' && nextChar === '}') || 
-                    (prevChar === '[' && nextChar === ']') || 
-                    (prevChar === '(' && nextChar === ')')) {
-                    e.preventDefault();
-                    const innerIndent = currentIndent + '    ';
-                    const insertion = '\n' + innerIndent + '\n' + currentIndent;
-                    insertText(textarea, insertion);
-                    textarea.selectionStart = textarea.selectionEnd = start + 1 + innerIndent.length;
-                    updateEditorMeta();
-                    if (liveToggle.checked) triggerLiveAnalysis();
-                    return;
-                }
-
-                // Case B: Normal line break with auto-indent
-                e.preventDefault();
-                let extraIndent = '';
-                const trimmedLine = currentLine.trim();
-                if (trimmedLine.endsWith('{') || trimmedLine.endsWith(':') || trimmedLine.endsWith('(') || trimmedLine.endsWith('[')) {
-                    extraIndent = '    ';
-                }
-                const newIndent = currentIndent + extraIndent;
-                insertText(textarea, '\n' + newIndent);
-                textarea.selectionStart = textarea.selectionEnd = start + 1 + newIndent.length;
-                updateEditorMeta();
-                if (liveToggle.checked) triggerLiveAnalysis();
-                return;
-            }
+    const saveDraft = debounce(() => {
+        store.set(DRAFT_KEY, {
+            code: codeInput.value,
+            language: languageSelect.value,
+            stdin: stdinInput.value,
         });
+    }, 400);
 
-        function insertText(elem, text, newCursor) {
-            elem.focus();
-            let success = false;
-            try {
-                success = document.execCommand('insertText', false, text);
-            } catch (err) {
-                success = false;
+    /* ---------- smart typing ---------- */
+
+    const PAIRS = { '(': ')', '[': ']', '{': '}', '"': '"', "'": "'", '`': '`' };
+
+    function insertAtCursor(text, cursorOffset) {
+        const start = codeInput.selectionStart;
+        const end = codeInput.selectionEnd;
+        codeInput.setRangeText(text, start, end, 'end');
+        if (cursorOffset !== undefined) {
+            codeInput.selectionStart = codeInput.selectionEnd = start + cursorOffset;
+        }
+        codeInput.focus();
+        updateMeta();
+        saveDraft();
+        if (liveToggle.checked) scheduleLive();
+    }
+
+    codeInput.addEventListener('keydown', (e) => {
+        if (e.isComposing) return;
+
+        const start = codeInput.selectionStart;
+        const end = codeInput.selectionEnd;
+        const value = codeInput.value;
+        const hasSelection = end > start;
+
+        /* run shortcuts */
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'Enter') {
+            e.preventDefault();
+            runCode(true);
+            return;
+        }
+        if (e.shiftKey && !e.ctrlKey && !e.metaKey && e.key === 'Enter') {
+            e.preventDefault();
+            runCode(false);
+            return;
+        }
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+            e.preventDefault();
+            analyse();
+            return;
+        }
+
+        /* undo of a programmatic replace (template / example) */
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && undoBuffer && !e.shiftKey) {
+            e.preventDefault();
+            codeInput.value = undoBuffer.code;
+            languageSelect.value = undoBuffer.language;
+            undoBuffer = null;
+            updateMeta();
+            saveDraft();
+            analyse({ silent: true });
+            toast('Restored your previous code', 'ok');
+            return;
+        }
+
+        /* tab / shift+tab */
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            if (hasSelection && value.substring(start, end).includes('\n')) {
+                const lineStart = value.lastIndexOf('\n', start - 1) + 1;
+                const nextBreak = value.indexOf('\n', end);
+                const lineEnd = nextBreak === -1 ? value.length : nextBreak;
+                const block = value.substring(lineStart, lineEnd);
+                const shifted = e.shiftKey
+                    ? block.split('\n').map((l) => l.replace(/^( {1,4}|\t)/, '')).join('\n')
+                    : block.split('\n').map((l) => '    ' + l).join('\n');
+                codeInput.setRangeText(shifted, lineStart, lineEnd, 'select');
+            } else if (e.shiftKey) {
+                const lineStart = value.lastIndexOf('\n', start - 1) + 1;
+                const prefix = value.substring(lineStart, start);
+                const spaces = Math.min((prefix.match(/^[ ]*/) || [''])[0].length, 4);
+                if (spaces > 0) {
+                    codeInput.setRangeText('', lineStart, lineStart + spaces, 'end');
+                    codeInput.selectionStart = codeInput.selectionEnd = Math.max(lineStart, start - spaces);
+                }
+            } else {
+                insertAtCursor('    ', 4);
+                return;
             }
-            if (!success) {
-                const s = elem.selectionStart;
-                const e = elem.selectionEnd;
-                elem.setRangeText(text, s, e, 'end');
+            updateMeta();
+            saveDraft();
+            if (liveToggle.checked) scheduleLive();
+            return;
+        }
+
+        /* auto-close / wrap */
+        if (PAIRS[e.key] && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            const open = e.key;
+            const close = PAIRS[open];
+
+            if (hasSelection) {
+                e.preventDefault();
+                const selected = value.substring(start, end);
+                codeInput.setRangeText(open + selected + close, start, end, 'end');
+                codeInput.selectionStart = start + 1;
+                codeInput.selectionEnd = end + 1;
+                updateMeta();
+                saveDraft();
+                if (liveToggle.checked) scheduleLive();
+                return;
             }
-            if (newCursor !== undefined) {
-                elem.selectionStart = elem.selectionEnd = newCursor;
+
+            if (open === '"' || open === "'" || open === '`') {
+                const nextChar = value[start] || '';
+                if (nextChar === open) {
+                    e.preventDefault();
+                    codeInput.selectionStart = codeInput.selectionEnd = start + 1;
+                    return;
+                }
+                if (/[\w)\]]/.test(value[start - 1] || '')) return;
+                if (!nextChar || /[\s)\]};,.:]/.test(nextChar)) {
+                    e.preventDefault();
+                    insertAtCursor(open + close, 1);
+                }
+                return;
+            }
+
+            e.preventDefault();
+            insertAtCursor(open + close, 1);
+            return;
+        }
+
+        /* step over closing character */
+        if ((')]}'.includes(e.key) || e.key === '"' || e.key === "'" || e.key === '`') && !hasSelection && value[start] === e.key) {
+            e.preventDefault();
+            codeInput.selectionStart = codeInput.selectionEnd = start + 1;
+            return;
+        }
+
+        /* smart backspace */
+        if (e.key === 'Backspace' && !hasSelection && start > 0) {
+            const prev = value[start - 1];
+            const next = value[start];
+            if (PAIRS[prev] === next) {
+                e.preventDefault();
+                codeInput.setSelectionRange(start - 1, start + 1);
+                codeInput.setRangeText('', start - 1, start + 1, 'end');
+                codeInput.selectionStart = codeInput.selectionEnd = start - 1;
+                updateMeta();
+                saveDraft();
+                if (liveToggle.checked) scheduleLive();
+                return;
             }
         }
 
-        function deletePair(elem, from, to) {
-            elem.focus();
-            elem.setSelectionRange(from, to);
-            let success = false;
-            try {
-                success = document.execCommand('delete');
-            } catch (err) {
-                success = false;
+        /* smart enter */
+        if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            const lineStart = value.lastIndexOf('\n', start - 1) + 1;
+            const currentLine = value.substring(lineStart, start);
+            const indent = (currentLine.match(/^[ \t]*/) || [''])[0];
+            const prev = value[start - 1];
+            const next = value[start];
+
+            if ((prev === '{' && next === '}') || (prev === '[' && next === ']') || (prev === '(' && next === ')')) {
+                e.preventDefault();
+                const inner = indent + '    ';
+                codeInput.setRangeText('\n' + inner + '\n' + indent, start, end, 'end');
+                codeInput.selectionStart = codeInput.selectionEnd = start + 1 + inner.length;
+                updateMeta();
+                saveDraft();
+                if (liveToggle.checked) scheduleLive();
+                return;
             }
-            if (!success) {
-                elem.setRangeText('', from, to, 'end');
-                elem.selectionStart = elem.selectionEnd = from;
+
+            const trimmed = currentLine.trim();
+            if (trimmed.endsWith('{') || trimmed.endsWith(':') || trimmed.endsWith('(') || trimmed.endsWith('[')) {
+                e.preventDefault();
+                const nextIndent = indent + '    ';
+                codeInput.setRangeText('\n' + nextIndent, start, end, 'end');
+                codeInput.selectionStart = codeInput.selectionEnd = start + 1 + nextIndent.length;
+                updateMeta();
+                saveDraft();
+                if (liveToggle.checked) scheduleLive();
             }
         }
+    });
+
+    /* ---------- toolbar ---------- */
+
+    function loadCode(code, language, message) {
+        if (codeInput.value.trim() && codeInput.value !== code) {
+            undoBuffer = { code: codeInput.value, language: languageSelect.value };
+        } else {
+            undoBuffer = null;
+        }
+        codeInput.value = code;
+        if (language) languageSelect.value = language;
+        updateMeta();
+        saveDraft();
+        showConsoleTab('output');
+        if (liveToggle.checked) analyse({ silent: true });
+        if (message) toast(message);
     }
 
-    setupSmartCodeEditor(codeInput);
-
-    function updateEditorMeta() {
-        const code = codeInput.value;
-        const lines = code.split('\n');
-        charCount.textContent = code.length;
-        lineCount.textContent = lines.length;
-
-        // Update line numbers
-        lineNumbers.textContent = lines.map((_, i) => i + 1).join('\n');
-    }
+    templateBtn.addEventListener('click', () => {
+        if (!runner) return;
+        const lang = languageSelect.value === 'auto' ? 'python' : languageSelect.value;
+        const template = runner.getTemplate(lang);
+        loadCode(template, lang === 'auto' ? 'python' : lang, `${lang.toUpperCase()} template loaded — Ctrl+Z to undo`);
+    });
 
     clearBtn.addEventListener('click', () => {
+        if (!codeInput.value) return;
+        undoBuffer = { code: codeInput.value, language: languageSelect.value };
         codeInput.value = '';
-        updateEditorMeta();
+        updateMeta();
+        saveDraft();
+        resetResults();
+        toast('Editor cleared — Ctrl+Z to undo');
         codeInput.focus();
     });
 
-    copyBtn.addEventListener('click', () => {
-        if (codeInput.value) {
-            navigator.clipboard.writeText(codeInput.value);
-            showToast('Code copied to clipboard!');
-        }
-    });
+    copyBtn.addEventListener('click', () => copyText(codeInput.value, 'Code copied'));
+    copyResultBtn.addEventListener('click', () => copyText(resultsBody.innerText, 'Results copied'));
 
-    // ==================== Live Analysis ====================
-    function triggerLiveAnalysis() {
-        clearTimeout(liveDebounceTimer);
-        liveDebounceTimer = setTimeout(() => {
-            const code = codeInput.value.trim();
-            if (!code) return;
-            const lang = languageSelect.value;
-            const result = analyzer.analyze(code, lang);
-            if (!result.error) {
-                renderResults(result, code, lastExecutionMetrics, true);
-                copyResultBtn.style.display = '';
-            }
-        }, 400);
-    }
+    languageSelect.addEventListener('change', () => {
+        saveDraft();
+        if (codeInput.value.trim()) analyse({ silent: true });
+    });
 
     liveToggle.addEventListener('change', () => {
-        if (liveToggle.checked) {
-            triggerLiveAnalysis();
-            showToast('Live Big-O analysis enabled');
-        } else {
-            showToast('Live Big-O analysis paused');
-        }
+        toast(liveToggle.checked ? 'Live analysis on' : 'Live analysis paused');
+        if (liveToggle.checked && codeInput.value.trim()) analyse({ silent: true });
     });
 
-    // ==================== Execution & Analysis ====================
+    /* ================================================================
+       Console helpers
+       ================================================================ */
+
+    copyTermBtn.addEventListener('click', () => copyText(terminalOutput.innerText, 'Output copied'));
+
+    clearTermBtn.addEventListener('click', () => {
+        terminalOutput.innerHTML = '<span class="t-dim">$ Cleared.</span>';
+        setStatus('idle', '');
+    });
+
+    stdinInput.addEventListener('input', saveDraft);
+
+    /* ================================================================
+       Analysis
+       ================================================================ */
+
+    const scheduleLive = debounce(() => analyse({ silent: true, live: true }), 400);
+
+    function setBusy(busy, which) {
+        const pairs = [
+            [runBtn, 'Running'],
+            [runAnalyzeBtn, 'Running'],
+            [analyzeBtn, 'Analysing'],
+        ];
+        pairs.forEach(([btn]) => {
+            if (!btn) return;
+            const content = btn.querySelector('.btn-content');
+            const loading = btn.querySelector('.btn-loading');
+            const active = busy && btn === which;
+            btn.disabled = busy;
+            if (content && loading) {
+                content.style.display = active ? 'none' : '';
+                loading.style.display = active ? 'inline-flex' : 'none';
+            }
+        });
+    }
+
+    function resetResults() {
+        resultsBody.innerHTML = `
+            <div class="empty">
+                <div class="empty-glyph" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/></svg>
+                </div>
+                <h2>Nothing to analyse</h2>
+                <p>Write some code on the left, or load an example from the Examples tab.</p>
+            </div>`;
+        copyResultBtn.hidden = true;
+    }
+
+    function analyse(options = {}) {
+        const { silent = false, metrics = lastMetrics } = options;
+        const code = codeInput.value.trim();
+
+        if (!code) {
+            if (!silent) toast('Write some code first', 'err');
+            resetResults();
+            return;
+        }
+
+        const button = silent ? null : analyzeBtn;
+        if (button) setBusy(true, analyzeBtn);
+
+        const paint = () => {
+            const result = analyzer.analyze(code, languageSelect.value);
+            renderResults(result, code, metrics);
+
+            if (!silent) {
+                bumpCounter();
+                if (!result.error) pushHistory(result, code, metrics);
+            }
+            if (button) setBusy(false);
+        };
+
+        if (button) requestAnimationFrame(() => requestAnimationFrame(paint));
+        else paint();
+    }
+
+    function bumpCounter() {
+        totalRuns += 1;
+        queryCount.textContent = totalRuns;
+        store.set('tc_runs', totalRuns);
+    }
+
+    /* ================================================================
+       Run
+       ================================================================ */
+
     runBtn.addEventListener('click', () => runCode(false));
     runAnalyzeBtn.addEventListener('click', () => runCode(true));
-    analyzeBtn.addEventListener('click', () => runAnalysis());
+    analyzeBtn.addEventListener('click', () => analyse());
 
-    async function runCode(andAnalyze = false) {
+    async function runCode(andAnalyse) {
         const code = codeInput.value.trim();
-        if (!code) {
-            showToast('Please write or paste some code first!');
-            return;
-        }
 
-        if (!runner) {
-            showToast('Execution engine is initializing or unavailable.');
+        if (!code) {
+            toast('Write some code first', 'err');
             return;
         }
+        if (!runner) {
+            toast('Execution engine unavailable', 'err');
+            return;
+        }
+        if (isRunning) return; // guard: keyboard shortcuts can't stack runs
 
         let lang = languageSelect.value;
         if (lang === 'auto') {
-            const detected = analyzer._detectLanguage(code);
-            lang = detected || 'python';
+            lang = analyzer._detectLanguage(code) || 'python';
+            languageSelect.value = lang;
         }
 
-        const stdin = stdinInput.value;
+        const seq = ++runSeq;
+        isRunning = true;
+        const button = andAnalyse ? runAnalyzeBtn : runBtn;
+        setBusy(true, button);
 
-        // Ensure output tab is visible
-        termTabs[0].click();
-
-        // Loading states
-        runBtn.disabled = true;
-        runBtn.querySelector('.btn-content').style.display = 'none';
-        runBtn.querySelector('.btn-loading').style.display = 'flex';
-
-        if (andAnalyze) {
-            runAnalyzeBtn.disabled = true;
-            runAnalyzeBtn.querySelector('.btn-content').style.display = 'none';
-            runAnalyzeBtn.querySelector('.btn-loading').style.display = 'flex';
-        }
-
-        termStatusDot.className = 'term-status-dot running';
-        termMetaChip.style.display = 'inline-block';
-        termMetaChip.className = 'term-meta-chip chip-running';
-        termMetaChip.textContent = 'Compiling & Running...';
-        terminalOutput.innerHTML = `<span class="term-dim">$ Compiling and executing with ${lang}...</span>\n`;
+        showConsoleTab('output');
+        setStatus('running', lang === 'pseudo' ? 'Checking…' : 'Running…');
+        terminalOutput.innerHTML = `<span class="t-dim">$ Running ${esc(lang)}…</span>`;
 
         try {
-            const execResult = await runner.execute(code, lang, stdin);
-            lastExecutionMetrics = execResult;
+            const result = await runner.execute(code, lang, stdinInput.value, {
+                onStatus: (status) => {
+                    if (seq === runSeq) terminalOutput.innerHTML = `<span class="t-dim">$ ${esc(status)}</span>`;
+                },
+            });
 
-            let formatted = '';
+            if (seq !== runSeq) return; // a newer run owns the terminal now
 
-            if (execResult.success) {
-                termStatusDot.className = 'term-status-dot success';
-                termMetaChip.className = 'term-meta-chip chip-success';
-                termMetaChip.textContent = `Exit 0 · ${execResult.durationMs}ms`;
+            lastMetrics = result;
+            renderTerminal(result);
+            bumpCounter();
 
-                if (execResult.stdout) {
-                    formatted += `<span class="term-stdout">${escapeHtml(execResult.stdout)}</span>`;
-                } else {
-                    formatted += `<span class="term-dim">(Program exited successfully with code 0 - No stdout output)</span>\n`;
-                }
-
-                if (execResult.stderr) {
-                    formatted += `\n<span class="term-stderr">[stderr]:\n${escapeHtml(execResult.stderr)}</span>`;
-                }
-            } else {
-                termStatusDot.className = 'term-status-dot error';
-                termMetaChip.className = 'term-meta-chip chip-error';
-                termMetaChip.textContent = `Exit ${execResult.exitCode !== undefined ? execResult.exitCode : 1} · ${execResult.durationMs}ms`;
-
-                if (execResult.compilerError) {
-                    formatted += `<span class="term-stderr">${escapeHtml(execResult.compilerError)}</span>\n`;
-                }
-                if (execResult.stderr && execResult.stderr !== execResult.compilerError) {
-                    formatted += `<span class="term-stderr">${escapeHtml(execResult.stderr)}</span>\n`;
-                }
-                if (execResult.stdout) {
-                    formatted += `<span class="term-stdout">${escapeHtml(execResult.stdout)}</span>\n`;
-                }
-                if (!formatted) {
-                    formatted = `<span class="term-stderr">Execution failed with exit code ${execResult.exitCode}</span>\n`;
-                }
-            }
-
-            terminalOutput.innerHTML = formatted;
-            terminalOutput.scrollTop = terminalOutput.scrollHeight;
-
-            totalQueries++;
-            queryCount.textContent = totalQueries;
-            localStorage.setItem('tc_queries', totalQueries);
-
-            if (andAnalyze || liveToggle.checked) {
-                const analysisResult = analyzer.analyze(code, lang);
-                renderResults(analysisResult, code, execResult);
-                addToHistory(analysisResult, code, execResult);
-                copyResultBtn.style.display = '';
-            }
+            // Always refresh the results panel after an explicit run — it used
+            // to stay frozen whenever "Live Big O" was off.
+            const analysis = analyzer.analyze(code, lang);
+            renderResults(analysis, code, result);
+            if (!analysis.error) pushHistory(analysis, code, result);
         } catch (err) {
-            termStatusDot.className = 'term-status-dot error';
-            termMetaChip.className = 'term-meta-chip chip-error';
-            termMetaChip.textContent = 'Error';
-            terminalOutput.innerHTML = `<span class="term-stderr">Runtime Error: ${escapeHtml(err.message)}</span>`;
+            if (seq !== runSeq) return;
+            setStatus('err', 'Error');
+            terminalOutput.innerHTML = `<span class="t-err">Unexpected error: ${esc(err.message || err)}</span>`;
         } finally {
-            runBtn.disabled = false;
-            runBtn.querySelector('.btn-content').style.display = 'flex';
-            runBtn.querySelector('.btn-loading').style.display = 'none';
-
-            if (andAnalyze) {
-                runAnalyzeBtn.disabled = false;
-                runAnalyzeBtn.querySelector('.btn-content').style.display = 'flex';
-                runAnalyzeBtn.querySelector('.btn-loading').style.display = 'none';
+            if (seq === runSeq) {
+                isRunning = false;
+                setBusy(false);
             }
         }
     }
 
-    function runAnalysis(executionMetrics = lastExecutionMetrics) {
-        const code = codeInput.value.trim();
-        if (!code) {
-            showToast('Please paste some code first!');
-            return;
+    function renderTerminal(result) {
+        const parts = [];
+
+        if (result.stdout) parts.push(`<span class="t-ok">${esc(result.stdout)}</span>`);
+        if (result.stderr) parts.push(`<span class="t-err">${esc(result.stderr)}</span>`);
+        if (!result.stdout && !result.stderr && result.compilerError) {
+            parts.push(`<span class="t-err">${esc(result.compilerError)}</span>`);
         }
+        if (!parts.length) parts.push('<span class="t-dim">(no output)</span>');
 
-        const lang = languageSelect.value;
+        parts.push('<span class="t-dim">' + esc(result.compiler || '') + ' · ' + result.durationMs + ' ms</span>');
 
-        // Show loading state
-        analyzeBtn.disabled = true;
-        analyzeBtn.querySelector('.btn-content').style.display = 'none';
-        analyzeBtn.querySelector('.btn-loading').style.display = 'flex';
+        terminalOutput.innerHTML = parts.join('\n');
+        terminalOutput.scrollTop = terminalOutput.scrollHeight;
 
-        setTimeout(() => {
-            const result = analyzer.analyze(code, lang);
-            renderResults(result, code, executionMetrics);
-
-            // Update query counter
-            totalQueries++;
-            queryCount.textContent = totalQueries;
-            localStorage.setItem('tc_queries', totalQueries);
-
-            // Save to history
-            addToHistory(result, code, executionMetrics);
-
-            // Reset button
-            analyzeBtn.disabled = false;
-            analyzeBtn.querySelector('.btn-content').style.display = 'flex';
-            analyzeBtn.querySelector('.btn-loading').style.display = 'none';
-
-            copyResultBtn.style.display = '';
-        }, 300);
+        if (result.success) setStatus('ok', `exit 0 · ${result.durationMs} ms`);
+        else setStatus('err', `exit ${result.exitCode} · ${result.durationMs} ms`);
     }
 
-    function renderResults(result, code, executionMetrics = lastExecutionMetrics, isLive = false) {
+    /* ================================================================
+       Results rendering
+       ================================================================ */
+
+    function ratingClass(label) {
+        switch (label) {
+            case 'Excellent':
+            case 'Great': return 'ok';
+            case 'Good': return 'ok';
+            case 'Fair': return 'warn';
+            case 'Poor': return 'warn';
+            default: return 'err';
+        }
+    }
+
+    function renderResults(result, code, metrics) {
+        if (!result) return;
+
         if (result.error) {
             resultsBody.innerHTML = `
-                <div class="empty-state">
-                    <div class="empty-icon">❌</div>
-                    <h3>Analysis Error</h3>
-                    <p>${result.error}</p>
+                <div class="result-error">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4.5M12 16h.01"/></svg>
+                    <div><strong>Can't analyse this</strong><p>${esc(result.error)}</p></div>
                 </div>`;
+            copyResultBtn.hidden = true;
             return;
         }
 
         const r = result;
+        const bench = metrics ? `
+            <div class="bench">
+                <span class="bench-title">
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="M13 2 4 14h6l-1 8 10-12h-6z"/></svg>
+                    Last run
+                </span>
+                <span class="badge ${metrics.success ? 'ok' : 'err'}">${metrics.success ? 'succeeded' : 'failed'}</span>
+                <span class="bench-sep"></span>
+                <span><strong>${metrics.durationMs} ms</strong></span>
+                <span class="bench-sep"></span>
+                <span>exit <strong>${esc(metrics.exitCode)}</strong></span>
+                <span class="bench-sep"></span>
+                <span>${esc((metrics.compiler || '').replace(' · remote sandbox', ''))}</span>
+            </div>` : '';
+
+        const assumptions = (r.assumptions && r.assumptions.length) ? `
+            <section class="block">
+                <h3 class="block-title">Assumptions</h3>
+                <ul>${r.assumptions.map((a) => `<li class="li-warn">${esc(a)}</li>`).join('')}</ul>
+            </section>` : '';
+
+        const explanation = (r.explanation || []).length ? `
+            <section class="block">
+                <h3 class="block-title">Why</h3>
+                <ul>${r.explanation.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>
+            </section>` : '';
+
+        const tips = (r.optimizations || []).length ? `
+            <section class="block">
+                <h3 class="block-title">Optimisation</h3>
+                ${r.optimizations.map((t) => `
+                    <div class="tip">
+                        <svg class="tip-glyph" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V18h8v-3.3A7 7 0 0 0 12 2z"/></svg>
+                        <span>${esc(t)}</span>
+                    </div>`).join('')}
+            </section>` : '';
 
         resultsBody.innerHTML = `
-            ${executionMetrics ? `
-            <!-- Execution Benchmark Card -->
-            <div class="benchmark-card">
-                <div class="benchmark-header">
-                    <div class="benchmark-title">
-                        <span>⚡ Execution Benchmark</span>
-                    </div>
-                    <span class="complexity-badge ${executionMetrics.success ? 'badge-good' : 'badge-bad'}">
-                        ${executionMetrics.success ? '✓ Run Succeeded' : '✗ Execution Failed'}
-                    </span>
-                </div>
-                <div class="benchmark-metrics">
-                    <div class="metric-item">
-                        <div class="metric-label">Execution Time</div>
-                        <div class="metric-value">${executionMetrics.durationMs} ms</div>
-                    </div>
-                    <div class="metric-item">
-                        <div class="metric-label">Status</div>
-                        <div class="metric-value">${executionMetrics.exitCode === 0 ? 'Exit 0' : 'Exit ' + executionMetrics.exitCode}</div>
-                    </div>
-                    <div class="metric-item">
-                        <div class="metric-label">Compiler Engine</div>
-                        <div class="metric-value" style="font-size:0.75rem;">${escapeHtml(executionMetrics.compiler || 'Default')}</div>
-                    </div>
-                </div>
-                <div class="benchmark-footer">
-                    💡 <strong>Empirical Runtime:</strong> Code executed in <strong>${executionMetrics.durationMs}ms</strong>. Theoretical time complexity is <strong>${r.timeComplexity}</strong>.
-                </div>
-            </div>` : ''}
-
-            <!-- Complexity Badge -->
-            <div class="result-complexity">
-                <div class="complexity-label">Time Complexity</div>
-                <div class="complexity-value">${r.timeComplexity}</div>
-                <div style="display:flex; justify-content:center; align-items:center; gap:8px; flex-wrap:wrap;">
-                    <span class="complexity-badge ${r.rating.class}">${r.rating.emoji} ${r.rating.label}</span>
-                    ${r.isUncertain ? '<span class="complexity-badge badge-uncertain">⚠️ Uncertain Estimate</span>' : ''}
+            <div class="result-hero">
+                <div class="result-hero-label">Time complexity</div>
+                <div class="result-hero-value">${esc(r.timeComplexity)}</div>
+                <div class="result-hero-badges">
+                    <span class="badge ${ratingClass(r.rating.label)}">${esc(r.rating.label)}</span>
+                    <span class="badge accent">${esc(String(r.language).toUpperCase())}</span>
+                    ${r.isUncertain ? '<span class="badge warn">uncertain</span>' : ''}
                 </div>
             </div>
 
-            <!-- Detail Cards -->
-            <div class="result-details">
-                <div class="detail-card">
-                    <div class="detail-label">Best Case</div>
-                    <div class="detail-value">${r.bestCase}</div>
-                </div>
-                <div class="detail-card">
-                    <div class="detail-label">Average</div>
-                    <div class="detail-value">${r.averageCase}</div>
-                </div>
-                <div class="detail-card">
-                    <div class="detail-label">Worst Case</div>
-                    <div class="detail-value">${r.worstCase}</div>
-                </div>
+            <div class="stat-grid">
+                <div class="stat"><div class="stat-label">Best</div><div class="stat-value">${esc(r.bestCase)}</div></div>
+                <div class="stat"><div class="stat-label">Average</div><div class="stat-value">${esc(r.averageCase)}</div></div>
+                <div class="stat"><div class="stat-label">Worst</div><div class="stat-value">${esc(r.worstCase)}</div></div>
+                <div class="stat"><div class="stat-label">Space</div><div class="stat-value">${esc(r.spaceComplexity)}</div></div>
             </div>
 
-            <!-- Space Complexity -->
-            <div class="result-details" style="margin-bottom:20px">
-                <div class="detail-card" style="flex:1">
-                    <div class="detail-label">Space Complexity</div>
-                    <div class="detail-value">${r.spaceComplexity}</div>
-                </div>
-                <div class="detail-card" style="flex:1">
-                    <div class="detail-label">Language</div>
-                    <div class="detail-value" style="text-transform:capitalize">${r.language}</div>
-                </div>
-            </div>
-
-            ${r.assumptions && r.assumptions.length > 0 ? `
-            <!-- Assumptions & Uncertainty -->
-            <div class="result-section">
-                <div class="result-section-title">⚠️ Assumptions & Uncertainty</div>
-                <div class="result-section-content">
-                    <ul>
-                        ${r.assumptions.map(a => `<li>${escapeHtml(a)}</li>`).join('')}
-                    </ul>
-                </div>
-            </div>` : ''}
-
-            <!-- Explanation -->
-            <div class="result-section">
-                <div class="result-section-title">📖 Explanation</div>
-                <div class="result-section-content">
-                    <ul>
-                        ${r.explanation.map(e => `<li>${e}</li>`).join('')}
-                    </ul>
-                </div>
-            </div>
-
-            <!-- Optimization Tips -->
-            <div class="result-section">
-                <div class="result-section-title">💡 Optimization Tips</div>
-                <div class="result-section-content">
-                    ${r.optimizations.map(t => `<div class="optimization-tip">${t}</div>`).join('')}
-                </div>
-            </div>
+            ${bench}
+            ${assumptions}
+            ${explanation}
+            ${tips}
         `;
 
-        if (!isLive) {
-            resultsBody.style.animation = 'none';
-            void resultsBody.offsetHeight;
-            resultsBody.style.animation = 'fadeIn 0.35s ease';
-        }
+        copyResultBtn.hidden = false;
     }
 
-    // Copy results
-    copyResultBtn.addEventListener('click', () => {
-        const text = resultsBody.innerText;
-        if (text) {
-            navigator.clipboard.writeText(text);
-            showToast('Results copied to clipboard!');
-        }
-    });
+    /* ================================================================
+       History
+       ================================================================ */
 
-    // ==================== History ====================
-    function addToHistory(result, code, executionMetrics = null) {
+    const MAX_HISTORY = 15;
+    const MAX_HISTORY_CODE = 20000;
+
+    function pushHistory(result, code, metrics) {
+        if (!result || result.error) return; // never store broken rows
+
+        const truncated = code.length > MAX_HISTORY_CODE;
         const entry = {
-            id: Date.now(),
-            code: code.substring(0, 500),
+            id: Date.now() + Math.random(),
+            code: truncated ? code.slice(0, MAX_HISTORY_CODE) : code,
+            truncated,
             language: result.language,
-            timeComplexity: result.timeComplexity,
-            spaceComplexity: result.spaceComplexity,
-            runtime: executionMetrics ? `${executionMetrics.durationMs}ms` : null,
-            rating: result.rating,
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            time: result.timeComplexity,
+            space: result.spaceComplexity,
+            runtime: metrics ? `${metrics.durationMs} ms` : null,
+            at: new Date().toISOString(),
         };
 
-        history.unshift(entry);
-        if (history.length > 20) history = history.slice(0, 20);
-        localStorage.setItem('tc_history', JSON.stringify(history));
+        history = [entry, ...history.filter((h) => !(h.code === entry.code && h.language === entry.language))].slice(0, MAX_HISTORY);
+        store.set('tc_history', history);
         renderHistory();
     }
 
     function renderHistory() {
-        if (history.length === 0) {
-            historySection.style.display = 'none';
+        if (!history.length) {
+            historySection.hidden = true;
             return;
         }
 
-        historySection.style.display = 'block';
-        historyGrid.innerHTML = history.map(h => `
-            <div class="history-card" data-code="${escapeHtml(h.code)}">
-                <div class="history-card-header">
-                    <span class="history-complexity">${h.timeComplexity}</span>
-                    <span class="history-lang">${h.language}${h.runtime ? ` · ⏱ ${h.runtime}` : ''}</span>
-                </div>
-                <div class="history-preview">${escapeHtml(h.code.substring(0, 120))}</div>
-                <div class="history-time">${h.timestamp}</div>
-            </div>
-        `).join('');
+        historySection.hidden = false;
+        historyGrid.innerHTML = history.map((h, i) => {
+            const preview = String(h.code || '').trim().split('\n').find((l) => l.trim()) || h.code || '';
+            const when = h.at ? new Date(h.at) : null;
+            const time = when && !isNaN(when) ? when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+            return `
+                <button class="history-row" data-index="${i}" title="Load this run">
+                    <span class="h-complexity">${esc(h.time || h.timeComplexity || '—')}</span>
+                    <span class="h-code">${esc(preview.slice(0, 140))}</span>
+                    <span class="h-meta">
+                        <span class="h-lang">${esc(h.language || '?')}</span>
+                        ${h.runtime ? `<span>${esc(h.runtime)}</span>` : ''}
+                        <span>${esc(time)}</span>
+                    </span>
+                </button>`;
+        }).join('');
 
-        // Click to load
-        historyGrid.querySelectorAll('.history-card').forEach(card => {
-            card.addEventListener('click', () => {
-                codeInput.value = card.dataset.code;
-                updateEditorMeta();
-                // Switch to analyzer tab
-                $$('.nav-btn').forEach(b => b.classList.remove('active'));
-                $$('.nav-btn')[0].classList.add('active');
-                $$('.tab-content').forEach(t => t.classList.remove('active'));
-                $('#tab-analyzer').classList.add('active');
-                codeInput.focus();
-                showToast('Code loaded from history!');
-                if (liveToggle.checked) {
-                    triggerLiveAnalysis();
-                }
+        historyGrid.querySelectorAll('.history-row').forEach((row) => {
+            row.addEventListener('click', () => {
+                const entry = history[Number(row.dataset.index)];
+                if (!entry) return;
+                loadCode(entry.code, entry.language, 'Loaded from history');
+                if (entry.truncated) toast('Heads-up: this entry was saved truncated', 'err');
             });
         });
     }
 
     clearHistoryBtn.addEventListener('click', () => {
         history = [];
-        localStorage.setItem('tc_history', '[]');
+        store.set('tc_history', history);
         renderHistory();
-        showToast('History cleared!');
+        toast('History cleared');
     });
 
-    // Initial render
-    queryCount.textContent = totalQueries;
-    renderHistory();
+    /* ================================================================
+       Examples
+       ================================================================ */
 
-    // ==================== Examples ====================
     const EXAMPLES = [
         {
-            name: 'Two Sum (Hash Map)',
+            name: 'Two Sum',
             complexity: 'O(n)',
-            desc: 'Find two numbers that add up to a target using an unordered_map for O(1) lookups.',
+            desc: 'One pass with a hash map instead of a nested loop.',
             lang: 'cpp',
-            code: `vector<int> twoSum(vector<int>& nums, int target) {
+            code: `// Two Sum — O(n) time, O(n) space
+#include <iostream>
+#include <vector>
+#include <unordered_map>
+using namespace std;
+
+vector<int> twoSum(vector<int>& nums, int target) {
     unordered_map<int, int> seen;
-    for (int i = 0; i < nums.size(); i++) {
-        int complement = target - nums[i];
-        if (seen.count(complement)) {
-            return {seen[complement], i};
-        }
+    for (int i = 0; i < (int)nums.size(); ++i) {
+        int need = target - nums[i];
+        if (seen.find(need) != seen.end()) return {seen[need], i};
         seen[nums[i]] = i;
     }
     return {};
+}
+
+int main() {
+    vector<int> nums = {2, 7, 11, 15};
+    vector<int> r = twoSum(nums, 9);
+    cout << "indices: " << r[0] << ", " << r[1] << endl;
+    return 0;
 }`,
         },
         {
             name: 'Binary Search',
             complexity: 'O(log n)',
-            desc: 'Search a sorted array by repeatedly halving the search space.',
+            desc: 'Halve the search space each step on a sorted array.',
             lang: 'cpp',
-            code: `int binarySearch(vector<int>& arr, int target) {
-    int lo = 0, hi = arr.size() - 1;
-    while (lo <= hi) {
-        int mid = lo + (hi - lo) / 2;
-        if (arr[mid] == target)
-            return mid;
-        else if (arr[mid] < target)
-            lo = mid + 1;
-        else
-            hi = mid - 1;
+            code: `// Binary search — O(log n) time, O(1) space
+#include <iostream>
+#include <vector>
+using namespace std;
+
+int binarySearch(vector<int>& a, int target) {
+    int l = 0, r = (int)a.size() - 1;
+    while (l <= r) {
+        int m = l + (r - l) / 2;
+        if (a[m] == target) return m;
+        if (a[m] < target) l = m + 1;
+        else r = m - 1;
     }
     return -1;
+}
+
+int main() {
+    vector<int> a = {1, 3, 5, 7, 9, 11, 13};
+    cout << "index of 9: " << binarySearch(a, 9) << endl;
+    return 0;
 }`,
         },
         {
             name: 'Bubble Sort',
             complexity: 'O(n²)',
-            desc: 'Repeatedly compare and swap adjacent elements. Simple but inefficient.',
+            desc: 'Adjacent swaps — quadratic. Good baseline for comparison.',
             lang: 'cpp',
-            code: `void bubbleSort(vector<int>& arr) {
-    int n = arr.size();
-    for (int i = 0; i < n; i++) {
-        for (int j = 0; j < n - i - 1; j++) {
-            if (arr[j] > arr[j + 1]) {
-                swap(arr[j], arr[j + 1]);
-            }
-        }
-    }
+            code: `// Bubble sort — O(n^2) time, O(1) space
+#include <iostream>
+#include <vector>
+using namespace std;
+
+void bubbleSort(vector<int>& a) {
+    int n = (int)a.size();
+    for (int i = 0; i < n - 1; ++i)
+        for (int j = 0; j < n - i - 1; ++j)
+            if (a[j] > a[j + 1]) swap(a[j], a[j + 1]);
+}
+
+int main() {
+    vector<int> a = {5, 1, 4, 2, 8};
+    bubbleSort(a);
+    for (int x : a) cout << x << " ";
+    cout << endl;
+    return 0;
 }`,
         },
         {
             name: 'Merge Sort',
             complexity: 'O(n log n)',
-            desc: 'Divide the array in half, sort each half, then merge. Optimal comparison sort.',
+            desc: 'Divide and conquer with a linear merge step.',
             lang: 'cpp',
-            code: `void merge(vector<int>& arr, int l, int m, int r) {
-    vector<int> left(arr.begin() + l, arr.begin() + m + 1);
-    vector<int> right(arr.begin() + m + 1, arr.begin() + r + 1);
+            code: `// Merge sort — O(n log n) time, O(n) space
+#include <iostream>
+#include <vector>
+using namespace std;
+
+void merge(vector<int>& a, int l, int m, int r) {
+    vector<int> L(a.begin() + l, a.begin() + m + 1);
+    vector<int> R(a.begin() + m + 1, a.begin() + r + 1);
     int i = 0, j = 0, k = l;
-    while (i < left.size() && j < right.size()) {
-        if (left[i] <= right[j])
-            arr[k++] = left[i++];
-        else
-            arr[k++] = right[j++];
-    }
-    while (i < left.size()) arr[k++] = left[i++];
-    while (j < right.size()) arr[k++] = right[j++];
+    while (i < (int)L.size() && j < (int)R.size())
+        a[k++] = (L[i] <= R[j]) ? L[i++] : R[j++];
+    while (i < (int)L.size()) a[k++] = L[i++];
+    while (j < (int)R.size()) a[k++] = R[j++];
 }
 
-void mergeSort(vector<int>& arr, int l, int r) {
+void mergeSort(vector<int>& a, int l, int r) {
     if (l >= r) return;
     int m = l + (r - l) / 2;
-    mergeSort(arr, l, m);
-    mergeSort(arr, m + 1, r);
-    merge(arr, l, m, r);
-}`,
-        },
-        {
-            name: 'Fibonacci (Naive)',
-            complexity: 'O(2^n)',
-            desc: 'Classic recursive Fibonacci — exponential due to repeated subproblems.',
-            lang: 'cpp',
-            code: `int fibonacci(int n) {
-    if (n <= 1)
-        return n;
-    return fibonacci(n - 1) + fibonacci(n - 2);
-}`,
-        },
-        {
-            name: 'Fibonacci (Memoized)',
-            complexity: 'O(n)',
-            desc: 'Fibonacci with memoization — each subproblem computed only once.',
-            lang: 'cpp',
-            code: `unordered_map<int, long long> memo;
+    mergeSort(a, l, m);
+    mergeSort(a, m + 1, r);
+    merge(a, l, m, r);
+}
 
-long long fibonacci(int n) {
-    if (memo.count(n))
-        return memo[n];
-    if (n <= 1)
-        return n;
-    memo[n] = fibonacci(n - 1) + fibonacci(n - 2);
+int main() {
+    vector<int> a = {9, 3, 7, 1, 8, 2};
+    mergeSort(a, 0, (int)a.size() - 1);
+    for (int x : a) cout << x << " ";
+    cout << endl;
+    return 0;
+}`,
+        },
+        {
+            name: 'Fibonacci (naive)',
+            complexity: 'O(2^n)',
+            desc: 'Exponential — the same subproblems are recomputed.',
+            lang: 'cpp',
+            code: `// Naive fibonacci — O(2^n) time, O(n) stack
+#include <iostream>
+using namespace std;
+
+long long fib(int n) {
+    if (n <= 1) return n;
+    return fib(n - 1) + fib(n - 2);
+}
+
+int main() {
+    cout << "fib(25) = " << fib(25) << endl;
+    return 0;
+}`,
+        },
+        {
+            name: 'Fibonacci (memoised)',
+            complexity: 'O(n)',
+            desc: 'Same recursion, but each subproblem is computed once.',
+            lang: 'cpp',
+            code: `// Memoised fibonacci — O(n) time, O(n) space
+#include <iostream>
+#include <unordered_map>
+using namespace std;
+
+unordered_map<int, long long> memo;
+
+long long fib(int n) {
+    if (n <= 1) return n;
+    if (memo.count(n)) return memo[n];
+    memo[n] = fib(n - 1) + fib(n - 2);
     return memo[n];
+}
+
+int main() {
+    cout << "fib(60) = " << fib(60) << endl;
+    return 0;
 }`,
         },
         {
-            name: 'Matrix Traversal',
+            name: 'Matrix traversal',
             complexity: 'O(n²)',
-            desc: 'Visit every cell in an n×n matrix. Common in grid-based problems.',
+            desc: 'Visit every cell of an n x n grid.',
             lang: 'cpp',
-            code: `int traverseMatrix(vector<vector<int>>& matrix) {
-    int n = matrix.size();
-    int sum = 0;
-    for (int i = 0; i < n; i++) {
-        for (int j = 0; j < n; j++) {
-            sum += matrix[i][j];
-        }
-    }
-    return sum;
+            code: `// Matrix traversal — O(n^2) time, O(1) space
+#include <iostream>
+#include <vector>
+using namespace std;
+
+int sumMatrix(vector<vector<int>>& m) {
+    int n = (int)m.size(), total = 0;
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j)
+            total += m[i][j];
+    return total;
+}
+
+int main() {
+    vector<vector<int>> m = {{1, 2}, {3, 4}};
+    cout << "sum: " << sumMatrix(m) << endl;
+    return 0;
 }`,
         },
         {
-            name: 'BFS Graph Traversal',
+            name: 'BFS on a graph',
             complexity: 'O(V + E)',
-            desc: 'Breadth-first search visits all vertices and edges in a graph.',
+            desc: 'Queue-driven traversal of every vertex and edge once.',
             lang: 'cpp',
-            code: `unordered_set<int> bfs(vector<vector<int>>& graph, int start) {
-    unordered_set<int> visited;
+            code: `// Breadth-first search — O(V + E) time, O(V) space
+#include <iostream>
+#include <vector>
+#include <queue>
+using namespace std;
+
+vector<int> bfs(vector<vector<int>>& graph, int start) {
+    vector<int> order, visited(graph.size(), 0);
     queue<int> q;
     q.push(start);
-    visited.insert(start);
+    visited[start] = 1;
     while (!q.empty()) {
-        int node = q.front();
-        q.pop();
-        for (int neighbor : graph[node]) {
-            if (!visited.count(neighbor)) {
-                visited.insert(neighbor);
-                q.push(neighbor);
+        int node = q.front(); q.pop();
+        order.push_back(node);
+        for (int nb : graph[node]) {
+            if (!visited[nb]) {
+                visited[nb] = 1;
+                q.push(nb);
             }
         }
     }
-    return visited;
+    return order;
+}
+
+int main() {
+    vector<vector<int>> g = {{1, 2}, {0, 3}, {0, 3}, {1, 2}};
+    for (int v : bfs(g, 0)) cout << v << " ";
+    cout << endl;
+    return 0;
 }`,
         },
         {
-            name: 'Constant Time Lookup',
+            name: 'Constant-time lookup',
             complexity: 'O(1)',
-            desc: 'Direct access by index or key — no iteration needed.',
+            desc: 'Direct index or hash access — no iteration at all.',
             lang: 'cpp',
-            code: `int getElement(vector<int>& arr, int index) {
-    return arr[index];
+            code: `// Constant time — O(1) time, O(1) space
+#include <iostream>
+#include <vector>
+#include <unordered_map>
+using namespace std;
+
+int getElement(vector<int>& a, int index) {
+    return a[index];
 }
 
-int getValue(unordered_map<string, int>& map, string key) {
-    return map[key];
+int getValue(unordered_map<string, int>& m, const string& key) {
+    return m[key];
+}
+
+int main() {
+    vector<int> a = {10, 20, 30};
+    unordered_map<string, int> m = {{"x", 7}};
+    cout << getElement(a, 1) << " " << getValue(m, "x") << endl;
+    return 0;
 }`,
         },
     ];
 
     function renderExamples() {
-        examplesGrid.innerHTML = EXAMPLES.map(ex => `
-            <div class="example-card" data-code="${escapeHtml(ex.code)}" data-lang="${ex.lang}">
-                <div class="example-header">
-                    <span class="example-name">${ex.name}</span>
-                    <span class="example-complexity">${ex.complexity}</span>
+        examplesGrid.innerHTML = EXAMPLES.map((ex, i) => `
+            <button class="example-card" data-index="${i}" aria-label="Load ${esc(ex.name)} example">
+                <div class="example-head">
+                    <span class="example-name">${esc(ex.name)}</span>
+                    <span class="badge accent">${esc(ex.complexity)}</span>
                 </div>
-                <div class="example-desc">${ex.desc}</div>
-                <div class="example-code">${escapeHtml(ex.code)}</div>
-            </div>
+                <p class="example-desc">${esc(ex.desc)}</p>
+                <pre class="example-code">${esc(ex.code.split('\n').slice(0, 9).join('\n'))}</pre>
+            </button>
         `).join('');
 
-        examplesGrid.querySelectorAll('.example-card').forEach(card => {
+        examplesGrid.querySelectorAll('.example-card').forEach((card) => {
             card.addEventListener('click', () => {
-                codeInput.value = card.dataset.code;
-                $('#languageSelect').value = card.dataset.lang;
-                updateEditorMeta();
-                // Switch to analyzer tab
-                $$('.nav-btn').forEach(b => b.classList.remove('active'));
-                $$('.nav-btn')[0].classList.add('active');
-                $$('.tab-content').forEach(t => t.classList.remove('active'));
-                $('#tab-analyzer').classList.add('active');
+                const ex = EXAMPLES[Number(card.dataset.index)];
+                if (!ex) return;
+                $$('.tab-btn').forEach((b) => {
+                    const on = b.dataset.tab === 'analyzer';
+                    b.classList.toggle('is-active', on);
+                    b.setAttribute('aria-selected', String(on));
+                });
+                $$('.tab-panel').forEach((p) => p.classList.toggle('is-active', p.id === 'tab-analyzer'));
+                loadCode(ex.code, ex.lang, `${ex.name} loaded — press Run`);
                 codeInput.focus();
-                showToast('Example loaded! Click "Analyze" to see results.');
             });
         });
     }
 
-    renderExamples();
+    /* ================================================================
+       Learn + chart
+       ================================================================ */
 
-    // ==================== Learn Tab ====================
     const COMPLEXITIES = [
-        { notation: 'O(1)', name: 'Constant', color: '#00cec9', desc: 'Execution time is independent of input size. Array access, hash lookups, simple arithmetic.', example: 'arr[0], dict["key"], x + y' },
-        { notation: 'O(log n)', name: 'Logarithmic', color: '#55efc4', desc: 'Halves the problem space each step. Binary search, balanced BST operations.', example: 'Binary search, finding in sorted array' },
-        { notation: 'O(n)', name: 'Linear', color: '#74b9ff', desc: 'Scales directly with input size. Single pass through array, linear search.', example: 'for x in arr: process(x)' },
-        { notation: 'O(n log n)', name: 'Linearithmic', color: '#fdcb6e', desc: 'Efficient sorting algorithms. Divide-and-conquer with linear merge step.', example: 'Merge sort, heap sort, Tim sort' },
-        { notation: 'O(n²)', name: 'Quadratic', color: '#e17055', desc: 'Nested iteration over input. Bubble sort, brute-force pair comparisons.', example: 'for i in arr: for j in arr: ...' },
-        { notation: 'O(2^n)', name: 'Exponential', color: '#d63031', desc: 'Doubles with each additional input element. Naive recursion, power set generation.', example: 'Recursive Fibonacci, subsets' },
-        { notation: 'O(n!)', name: 'Factorial', color: '#fd79a8', desc: 'Grows factorially — impractical for n > ~12. Permutations, traveling salesman brute-force.', example: 'Generate all permutations' },
+        { notation: 'O(1)', name: 'Constant', color: '#0f9d8f', desc: 'Independent of input size. Array index, hash lookup.', example: 'arr[i] · dict[key] · x + y' },
+        { notation: 'O(log n)', name: 'Logarithmic', color: '#3aa675', desc: 'Halves the problem each step. Binary search, balanced trees.', example: 'binary search · BST lookup' },
+        { notation: 'O(n)', name: 'Linear', color: '#4f8ddb', desc: 'One pass over the input. Linear search, single loop.', example: 'for x in arr: visit(x)' },
+        { notation: 'O(n log n)', name: 'Linearithmic', color: '#c08a2e', desc: 'Efficient comparison sorts and divide-and-conquer.', example: 'merge sort · heap sort · sorted()' },
+        { notation: 'O(n²)', name: 'Quadratic', color: '#d2703a', desc: 'Nested loops over the same input. Bubble/insertion sort.', example: 'for i: for j: compare' },
+        { notation: 'O(2^n)', name: 'Exponential', color: '#c94f45', desc: 'Doubles with each extra element. Naive recursion, subsets.', example: 'naive fibonacci · power set' },
+        { notation: 'O(n!)', name: 'Factorial', color: '#a34e8f', desc: 'Every ordering. Impractical past n ≈ 12.', example: 'permutations · TSP brute force' },
     ];
 
-    function renderLearnCards() {
-        learnGrid.innerHTML = COMPLEXITIES.map(c => `
-            <div class="learn-card" style="border-left: 4px solid ${c.color}">
-                <div class="learn-card-header">
-                    <span class="learn-notation" style="color:${c.color}">${c.notation}</span>
-                    <span class="learn-name">${c.name}</span>
+    function renderLearn() {
+        learnGrid.innerHTML = COMPLEXITIES.map((c) => `
+            <article class="learn-card" style="--c:${c.color}">
+                <div class="learn-head">
+                    <span class="learn-notation">${esc(c.notation)}</span>
+                    <span class="learn-name">${esc(c.name)}</span>
                 </div>
-                <div class="learn-desc">${c.desc}</div>
-                <div class="learn-example">${c.example}</div>
-            </div>
+                <p class="learn-desc">${esc(c.desc)}</p>
+                <code class="learn-ex">${esc(c.example)}</code>
+            </article>
         `).join('');
+
+        if (chartLegend) {
+            chartLegend.innerHTML = COMPLEXITIES.slice(0, 5).map((c) => `
+                <span class="chart-legend-item">
+                    <span class="chart-legend-swatch" style="background:${c.color}"></span>${esc(c.notation)}
+                </span>`).join('');
+        }
     }
 
-    renderLearnCards();
-
-    // ==================== Complexity Chart (Canvas) ====================
-    function drawComplexityChart() {
+    function drawChart() {
         const canvas = $('#complexityChart');
-        if (!canvas) return;
+        if (!canvas || !canvas.parentElement) return;
+
+        const box = canvas.parentElement.getBoundingClientRect();
+        const W = Math.max(280, Math.floor(box.width));
+        const H = 320;
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+        canvas.width = Math.floor(W * dpr);
+        canvas.height = Math.floor(H * dpr);
+        canvas.style.width = '100%';
+        canvas.style.height = H + 'px';
 
         const ctx = canvas.getContext('2d');
-        const dpr = window.devicePixelRatio || 1;
-        const rect = canvas.parentElement.getBoundingClientRect();
-        const W = rect.width - 64;
-        const H = 320;
-
-        canvas.width = W * dpr;
-        canvas.height = H * dpr;
-        canvas.style.width = W + 'px';
-        canvas.style.height = H + 'px';
-        ctx.scale(dpr, dpr);
-
-        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-        const textColor = isDark ? '#9898b8' : '#4a4a6a';
-        const gridColor = isDark ? 'rgba(100,100,255,0.08)' : 'rgba(0,0,0,0.06)';
-
-        // Clear
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, W, H);
 
-        const padL = 60, padR = 30, padT = 20, padB = 50;
-        const plotW = W - padL - padR;
+        const css = getComputedStyle(document.documentElement);
+        const gridColor = css.getPropertyValue('--border').trim() || '#e2e5ea';
+        const axisColor = css.getPropertyValue('--text-3').trim() || '#6b7280';
+        const textColor = css.getPropertyValue('--text-2').trim() || '#4d5562';
+
+        const padL = 46, padR = 16, padT = 14, padB = 34;
+        const plotW = Math.max(40, W - padL - padR);
         const plotH = H - padT - padB;
 
-        // Grid
+        const maxN = 24;
+        const maxOps = 120;
+
+        // grid
         ctx.strokeStyle = gridColor;
         ctx.lineWidth = 1;
-        for (let i = 0; i <= 5; i++) {
-            const y = padT + (plotH / 5) * i;
+        ctx.font = '11px Inter, system-ui, sans-serif';
+        ctx.fillStyle = axisColor;
+        ctx.textAlign = 'right';
+
+        for (let i = 0; i <= 4; i++) {
+            const y = padT + (plotH / 4) * i;
             ctx.beginPath();
-            ctx.moveTo(padL, y);
-            ctx.lineTo(padL + plotW, y);
+            ctx.moveTo(padL, y + 0.5);
+            ctx.lineTo(padL + plotW, y + 0.5);
             ctx.stroke();
+            ctx.fillText(String(Math.round(maxOps - (maxOps / 4) * i)), padL - 8, y + 4);
         }
 
-        // Axes labels
-        ctx.fillStyle = textColor;
-        ctx.font = '12px Inter, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('Input Size (n)', padL + plotW / 2, H - 5);
+        for (let n = 0; n <= maxN; n += 6) {
+            const x = padL + (n / maxN) * plotW;
+            ctx.fillText(String(n), x, padT + plotH + 18);
+        }
 
-        ctx.save();
-        ctx.translate(15, padT + plotH / 2);
-        ctx.rotate(-Math.PI / 2);
-        ctx.fillText('Operations', 0, 0);
-        ctx.restore();
+        ctx.textAlign = 'center';
+        ctx.fillText('input size (n)', padL + plotW / 2, H - 4);
 
-        // Functions to plot
-        const maxN = 25;
-        const maxOps = 200;
-        const functions = [
-            { label: 'O(1)', color: '#00cec9', fn: () => 1 },
-            { label: 'O(log n)', color: '#55efc4', fn: (n) => Math.log2(Math.max(1, n)) },
-            { label: 'O(n)', color: '#74b9ff', fn: (n) => n },
-            { label: 'O(n log n)', color: '#fdcb6e', fn: (n) => n * Math.log2(Math.max(1, n)) },
-            { label: 'O(n²)', color: '#e17055', fn: (n) => n * n },
-            { label: 'O(2^n)', color: '#d63031', fn: (n) => Math.pow(2, n) },
+        // curves
+        const curves = [
+            { label: 'O(1)', color: '#0f9d8f', fn: () => 1 },
+            { label: 'O(log n)', color: '#3aa675', fn: (n) => Math.log2(Math.max(1, n)) },
+            { label: 'O(n)', color: '#4f8ddb', fn: (n) => n },
+            { label: 'O(n log n)', color: '#c08a2e', fn: (n) => n * Math.log2(Math.max(1, n)) },
+            { label: 'O(n²)', color: '#d2703a', fn: (n) => n * n },
         ];
 
-        functions.forEach(({ label, color, fn }) => {
+        curves.forEach(({ color, fn }) => {
             ctx.strokeStyle = color;
-            ctx.lineWidth = 2.5;
+            ctx.lineWidth = 2;
+            ctx.lineJoin = 'round';
             ctx.beginPath();
 
             let started = false;
-            for (let n = 0; n <= maxN; n += 0.5) {
+            for (let n = 0; n <= maxN; n += 0.25) {
                 const ops = fn(n);
-                const x = padL + (n / maxN) * plotW;
-                const y = padT + plotH - (Math.min(ops, maxOps) / maxOps) * plotH;
-
-                if (!started) {
-                    ctx.moveTo(x, y);
-                    started = true;
-                } else {
-                    ctx.lineTo(x, y);
-                }
-
                 if (ops > maxOps) break;
+                const x = padL + (n / maxN) * plotW;
+                const y = padT + plotH - (ops / maxOps) * plotH;
+                if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
             }
             ctx.stroke();
-
-            // Label at end of visible line
-            const lastN = Math.min(maxN, (() => {
-                for (let n = maxN; n >= 0; n -= 0.5) {
-                    if (fn(n) <= maxOps) return n;
-                }
-                return 0;
-            })());
-            const lx = padL + (lastN / maxN) * plotW;
-            const ly = padT + plotH - (Math.min(fn(lastN), maxOps) / maxOps) * plotH;
-
-            ctx.fillStyle = color;
-            ctx.font = 'bold 11px JetBrains Mono, monospace';
-            ctx.textAlign = 'left';
-            ctx.fillText(label, lx + 6, ly + 4);
         });
+
+        // axis lines
+        ctx.strokeStyle = axisColor;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(padL + 0.5, padT);
+        ctx.lineTo(padL + 0.5, padT + plotH + 0.5);
+        ctx.lineTo(padL + plotW, padT + plotH + 0.5);
+        ctx.stroke();
+
+        // x-axis label colour handled above
+        ctx.fillStyle = textColor;
     }
 
-    // Redraw on resize
+    const redrawChart = debounce(drawChart, 120);
     window.addEventListener('resize', () => {
-        if ($('#tab-learn').classList.contains('active')) {
-            drawComplexityChart();
-        }
+        if ($('#tab-learn').classList.contains('is-active')) redrawChart();
     });
 
-    // ==================== Particle Background ====================
-    function initParticles() {
-        const canvas = $('#particles');
-        const ctx = canvas.getContext('2d');
-        let W, H;
-        const particles = [];
-        const PARTICLE_COUNT = 60;
+    /* ================================================================
+       Boot
+       ================================================================ */
 
-        function resize() {
-            W = canvas.width = window.innerWidth;
-            H = canvas.height = window.innerHeight;
-        }
-        resize();
-        window.addEventListener('resize', resize);
-
-        class Particle {
-            constructor() {
-                this.reset();
-            }
-            reset() {
-                this.x = Math.random() * W;
-                this.y = Math.random() * H;
-                this.vx = (Math.random() - 0.5) * 0.4;
-                this.vy = (Math.random() - 0.5) * 0.4;
-                this.r = Math.random() * 2 + 0.5;
-                this.alpha = Math.random() * 0.5 + 0.1;
-            }
-            update() {
-                this.x += this.vx;
-                this.y += this.vy;
-                if (this.x < 0 || this.x > W) this.vx *= -1;
-                if (this.y < 0 || this.y > H) this.vy *= -1;
-            }
-            draw() {
-                ctx.beginPath();
-                ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(108, 92, 231, ${this.alpha})`;
-                ctx.fill();
-            }
+    function boot() {
+        const draft = store.get(DRAFT_KEY, null);
+        if (draft && typeof draft.code === 'string' && draft.code.trim()) {
+            codeInput.value = draft.code;
+            if (draft.language) languageSelect.value = draft.language;
+            if (typeof draft.stdin === 'string') stdinInput.value = draft.stdin;
         }
 
-        for (let i = 0; i < PARTICLE_COUNT; i++) {
-            particles.push(new Particle());
-        }
+        updateMeta();
+        queryCount.textContent = totalRuns;
+        renderHistory();
+        renderExamples();
+        renderLearn();
 
-        function connectParticles() {
-            for (let i = 0; i < particles.length; i++) {
-                for (let j = i + 1; j < particles.length; j++) {
-                    const dx = particles[i].x - particles[j].x;
-                    const dy = particles[i].y - particles[j].y;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
-                    if (dist < 150) {
-                        ctx.beginPath();
-                        ctx.moveTo(particles[i].x, particles[i].y);
-                        ctx.lineTo(particles[j].x, particles[j].y);
-                        ctx.strokeStyle = `rgba(108, 92, 231, ${0.08 * (1 - dist / 150)})`;
-                        ctx.lineWidth = 0.5;
-                        ctx.stroke();
-                    }
-                }
-            }
+        if (codeInput.value.trim() && liveToggle.checked) {
+            analyse({ silent: true });
         }
-
-        function animate() {
-            ctx.clearRect(0, 0, W, H);
-            particles.forEach(p => { p.update(); p.draw(); });
-            connectParticles();
-            requestAnimationFrame(animate);
-        }
-
-        animate();
     }
 
-    initParticles();
-
-    // ==================== Toast ====================
-    function showToast(message) {
-        toast.textContent = message;
-        toast.classList.add('show');
-        setTimeout(() => toast.classList.remove('show'), 2500);
-    }
-
-    // ==================== Utility ====================
-    function escapeHtml(str) {
-        const div = document.createElement('div');
-        div.textContent = str;
-        return div.innerHTML.replace(/"/g, '&quot;');
-    }
-
-    // ==================== Init ====================
-    codeInput.value = '';
-    updateEditorMeta();
-
-    // Pre-warm Pyodide WebAssembly runtime in background
-    if (runner && typeof loadPyodide !== 'undefined') {
-        runner._pyodidePromise = loadPyodide({
-            indexURL: "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/"
-        }).catch(err => {
-            console.warn('Background Pyodide pre-warm notice:', err);
-        });
-    }
-
+    boot();
 })();

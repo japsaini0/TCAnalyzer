@@ -1,94 +1,78 @@
 /**
- * TC Analyzer — Code Execution & Compiler Engine
- * 
- * Supports:
- * - Multi-language remote compilation via Wandbox (C++, Python, Java, C, Go, Rust)
- * - Instant local client-side execution for JavaScript (Web Worker / Sandbox)
- * - Standard input (stdin) support
- * - Execution benchmarking and latency tracking
- * - Starter code templates for all supported languages
+ * TC Analyzer — Execution engine
+ *
+ * JS      → sandboxed Web Worker (terminatable, so `while(true){}` cannot freeze the tab)
+ * Python  → Pyodide WebAssembly inside a Web Worker, fresh globals per run
+ * C/C++/Java/Go/Rust → remote Wandbox compiler (with retry), or a local
+ *                       `/api/run` server when you're running `node serve.js`
  */
 
 class CodeRunner {
     constructor() {
         this.apiEndpoint = 'https://wandbox.org/api/compile.json';
-        
-        // Compiler mappings
+
+        // Wall-clock limits (ms). The old build advertised 18s but the only
+        // timer it had was 16s and it never applied to local JS/Python at all.
+        this.LOCAL_TIMEOUT = 5000;
+        this.REMOTE_TIMEOUT = 20000;
+
+        this.pyodideVersion = 'v0.26.4';
+        this.pyodideIndex = `https://cdn.jsdelivr.net/pyodide/${this.pyodideVersion}/full/`;
+
         this.compilers = {
-            'python': 'cpython-3.12.7',
-            'cpp': 'gcc-13.2.0',
-            'c': 'gcc-13.2.0-c',
-            'java': 'openjdk-jdk-22+36',
-            'javascript': 'nodejs-20.17.0',
-            'go': 'go-1.23.2',
-            'rust': 'rust-1.82.0'
+            python: 'cpython-3.12.7',
+            cpp: 'gcc-13.2.0',
+            c: 'gcc-13.2.0-c',
+            java: 'openjdk-jdk-22+36',
+            javascript: 'nodejs-20.17.0',
+            go: 'go-1.23.2',
+            rust: 'rust-1.82.0',
         };
 
-        // Runnable algorithm templates
+        this._pyWorker = null;
+        this._pyReady = false;
+
         this.templates = {
-            python: `# Two Sum — O(N) Time, O(N) Space
+            python: `# Two Sum — O(n) time, O(n) space
 def two_sum(nums, target):
     seen = {}
     for i, num in enumerate(nums):
-        complement = target - num
-        if complement in seen:
-            return [seen[complement], i]
+        if target - num in seen:
+            return [seen[target - num], i]
         seen[num] = i
     return []
 
-# Test execution
 nums = [2, 7, 11, 15]
 target = 9
-result = two_sum(nums, target)
-
-print("--- Execution Output ---")
-print(f"Array: {nums}")
-print(f"Target: {target}")
-print(f"Solution indices: {result}")
-print(f"Values: [{nums[result[0]]}, {nums[result[1]]}]")
+print("indices:", two_sum(nums, target))
 `,
 
-            javascript: `// Two Sum — O(N) Time, O(N) Space
+            javascript: `// Two Sum — O(n) time, O(n) space
 function twoSum(nums, target) {
     const seen = new Map();
     for (let i = 0; i < nums.length; i++) {
-        const complement = target - nums[i];
-        if (seen.has(complement)) {
-            return [seen.get(complement), i];
-        }
+        const need = target - nums[i];
+        if (seen.has(need)) return [seen.get(need), i];
         seen.set(nums[i], i);
     }
     return [];
 }
 
-// Test execution
 const nums = [2, 7, 11, 15];
-const target = 9;
-const result = twoSum(nums, target);
-
-console.log("--- Execution Output ---");
-console.log("Array:", nums);
-console.log("Target:", target);
-console.log("Solution indices:", result);
-if (result.length) {
-    console.log(\`Values: [\${nums[result[0]]}, \${nums[result[1]]}]\`);
-}
+console.log("indices:", twoSum(nums, 9));
 `,
 
-            cpp: `// Two Sum — O(N) Time, O(N) Space
+            cpp: `// Two Sum — O(n) time, O(n) space
 #include <iostream>
 #include <vector>
 #include <unordered_map>
-
 using namespace std;
 
 vector<int> twoSum(vector<int>& nums, int target) {
     unordered_map<int, int> seen;
     for (int i = 0; i < (int)nums.size(); ++i) {
-        int complement = target - nums[i];
-        if (seen.find(complement) != seen.end()) {
-            return {seen[complement], i};
-        }
+        int need = target - nums[i];
+        if (seen.find(need) != seen.end()) return {seen[need], i};
         seen[nums[i]] = i;
     }
     return {};
@@ -96,77 +80,51 @@ vector<int> twoSum(vector<int>& nums, int target) {
 
 int main() {
     vector<int> nums = {2, 7, 11, 15};
-    int target = 9;
-    vector<int> res = twoSum(nums, target);
-
-    cout << "--- Execution Output ---" << endl;
-    cout << "Target: " << target << endl;
-    if (res.size() >= 2) {
-        cout << "Indices: [" << res[0] << ", " << res[1] << "]" << endl;
-        cout << "Values: [" << nums[res[0]] << ", " << nums[res[1]] << "]" << endl;
-    }
+    vector<int> res = twoSum(nums, 9);
+    cout << "indices: " << res[0] << ", " << res[1] << endl;
     return 0;
 }
 `,
 
-            c: `// Linear Search — O(N) Time, O(1) Space
+            c: `// Linear search — O(n) time, O(1) space
 #include <stdio.h>
 
 int linearSearch(int arr[], int n, int target) {
-    for (int i = 0; i < n; i++) {
+    for (int i = 0; i < n; i++)
         if (arr[i] == target) return i;
-    }
     return -1;
 }
 
-int main() {
+int main(void) {
     int arr[] = {10, 20, 35, 50, 75, 90};
     int n = sizeof(arr) / sizeof(arr[0]);
-    int target = 50;
-
-    printf("--- Execution Output ---\\n");
-    int idx = linearSearch(arr, n, target);
-    if (idx != -1) {
-        printf("Found %d at index %d\\n", target, idx);
-    } else {
-        printf("Target %d not found\\n", target);
-    }
+    printf("found 50 at index %d\\n", linearSearch(arr, n, 50));
     return 0;
 }
 `,
 
-            java: `// Two Sum — O(N) Time, O(N) Space
+            java: `// Two Sum — O(n) time, O(n) space
 import java.util.*;
 
 class Main {
-    public static int[] twoSum(int[] nums, int target) {
-        Map<Integer, Integer> map = new HashMap<>();
+    static int[] twoSum(int[] nums, int target) {
+        Map<Integer, Integer> seen = new HashMap<>();
         for (int i = 0; i < nums.length; i++) {
-            int complement = target - nums[i];
-            if (map.containsKey(complement)) {
-                return new int[] { map.get(complement), i };
-            }
-            map.put(nums[i], i);
+            int need = target - nums[i];
+            if (seen.containsKey(need)) return new int[]{ seen.get(need), i };
+            seen.put(nums[i], i);
         }
         return new int[0];
     }
 
     public static void main(String[] args) {
-        int[] nums = {2, 7, 11, 15};
-        int target = 9;
-        int[] result = twoSum(nums, target);
-
-        System.out.println("--- Execution Output ---");
-        System.out.println("Target: " + target);
-        if (result.length >= 2) {
-            System.out.println("Indices: [" + result[0] + ", " + result[1] + "]");
-            System.out.println("Values: [" + nums[result[0]] + ", " + nums[result[1]] + "]");
-        }
+        int[] res = twoSum(new int[]{2, 7, 11, 15}, 9);
+        System.out.println("indices: " + res[0] + ", " + res[1]);
     }
 }
 `,
 
-            go: `// Two Sum — O(N) Time, O(N) Space
+            go: `// Two Sum — O(n) time, O(n) space
 package main
 
 import "fmt"
@@ -174,9 +132,8 @@ import "fmt"
 func twoSum(nums []int, target int) []int {
     seen := make(map[int]int)
     for i, num := range nums {
-        complement := target - num
-        if idx, found := seen[complement]; found {
-            return []int{idx, i}
+        if j, ok := seen[target-num]; ok {
+            return []int{j, i}
         }
         seen[num] = i
     }
@@ -184,105 +141,383 @@ func twoSum(nums []int, target int) []int {
 }
 
 func main() {
-    nums := []int{2, 7, 11, 15}
-    target := 9
-    res := twoSum(nums, target)
-
-    fmt.Println("--- Execution Output ---")
-    fmt.Println("Target:", target)
-    if len(res) == 2 {
-        fmt.Printf("Indices: [%d, %d]\\n", res[0], res[1])
-        fmt.Printf("Values: [%d, %d]\\n", nums[res[0]], nums[res[1]])
-    }
+    res := twoSum([]int{2, 7, 11, 15}, 9)
+    fmt.Println("indices:", res)
 }
 `,
 
-            rust: `// Two Sum — O(N) Time, O(N) Space
+            rust: `// Two Sum — O(n) time, O(n) space
 use std::collections::HashMap;
 
 fn two_sum(nums: &[i32], target: i32) -> Option<(usize, usize)> {
     let mut seen = HashMap::new();
-    for (i, &num) in nums.iter().enumerate() {
-        let complement = target - num;
-        if let Some(&prev_idx) = seen.get(&complement) {
-            return Some((prev_idx, i));
+    for (i, &n) in nums.iter().enumerate() {
+        if let Some(&j) = seen.get(&(target - n)) {
+            return Some((j, i));
         }
-        seen.insert(num, i);
+        seen.insert(n, i);
     }
     None
 }
 
 fn main() {
     let nums = vec![2, 7, 11, 15];
-    let target = 9;
-
-    println!("--- Execution Output ---");
-    println!("Target: {}", target);
-    if let Some((i, j)) = two_sum(&nums, target) {
-        println!("Indices: [{}, {}]", i, j);
-        println!("Values: [{}, {}]", nums[i], nums[j]);
-    }
+    println!("indices: {:?}", two_sum(&nums, 9));
 }
-`
+`,
+
+            pseudo: `// Pseudocode — analysed, not executed
+FUNCTION twoSum(nums, target)
+    CREATE empty map seen
+    FOR i = 0 TO length(nums) - 1 DO
+        need = target - nums[i]
+        IF need EXISTS IN seen THEN
+            RETURN [seen[need], i]
+        END IF
+        seen[nums[i]] = i
+    END FOR
+END FUNCTION
+`,
         };
     }
 
-    /**
-     * Get starter code template for a language
-     */
+    /** Starter code for a language (falls back to Python). */
     getTemplate(language) {
         const lang = (language || '').toLowerCase();
-        return this.templates[lang] || this.templates['python'];
+        return this.templates[lang] || this.templates.python;
     }
 
     /**
-     * Execute code either in-browser (JS / Pyodide Python), via local compiler server, or via Wandbox remote compiler
-     * @param {string} code 
-     * @param {string} language 
-     * @param {string} stdin 
-     * @param {boolean} forceRemote 
+     * Execute code.
+     * @param {string} code
+     * @param {string} language
+     * @param {string} stdin
+     * @param {{forceRemote?: boolean, onStatus?: (s: string) => void}} [opts]
      */
-    async execute(code, language = 'python', stdin = '', forceRemote = false) {
+    async execute(code, language = 'python', stdin = '', opts = {}) {
         const startTime = performance.now();
         const normLang = (language || '').toLowerCase();
+        const onStatus = typeof opts.onStatus === 'function' ? opts.onStatus : () => {};
+        const forceRemote = Boolean(opts.forceRemote);
 
-        // 1. Fast path for JavaScript (in-browser sandbox)
-        if ((normLang === 'javascript' || normLang === 'js') && !forceRemote) {
-            return this._executeLocalJS(code, startTime);
+        if (normLang === 'pseudo') {
+            return this._result({
+                success: false,
+                compiler: 'Pseudocode',
+                language: 'pseudo',
+                compilerError:
+                    'Pseudocode can be analysed, not executed.\n' +
+                    'Press "Analyse" to get the Big O, or switch the language to run real code.',
+                exitCode: -1,
+                startTime,
+            });
         }
 
-        // 2. In-browser Python via Pyodide WebAssembly (rock-solid, zero OCI/server errors)
+        // 1. JavaScript — isolated, terminatable worker
+        if ((normLang === 'javascript' || normLang === 'js' || normLang === 'typescript') && !forceRemote) {
+            return this._runJS(code, stdin, startTime);
+        }
+
+        // 2. Python — Pyodide in a worker, fresh namespace per run
         if ((normLang === 'python' || normLang === 'py') && !forceRemote) {
             try {
-                return await this._executePythonInBrowser(code, startTime, stdin);
-            } catch (pyErr) {
-                console.warn('Pyodide in-browser execution fallback to local server or remote:', pyErr);
+                return await this._runPython(code, stdin, startTime, onStatus);
+            } catch (err) {
+                console.warn('Pyodide unavailable, trying remote compiler:', err);
+                onStatus('Python runtime unavailable — using remote compiler');
             }
         }
 
-        // 3. Fast path: Local Server Execution (sub-second native compilation for C++, C, Python, etc.)
+        // 3. Optional local compiler server (only when actually served locally)
         if (!forceRemote) {
-            try {
-                const localResult = await this._executeLocalServer(code, normLang, stdin, startTime);
-                if (localResult && localResult.supportedLocally !== false) {
-                    return localResult;
-                }
-            } catch (serverErr) {
-                // Local server endpoint not reachable -> fallback smoothly to remote Wandbox
-            }
+            const local = await this._runLocalServer(code, normLang, stdin, startTime);
+            if (local) return local;
         }
 
-        // 4. Remote execution via Wandbox with auto-retry
-        return await this._executeWandboxWithRetry(code, normLang, stdin, startTime);
+        // 4. Remote Wandbox
+        return this._runWandbox(code, normLang, stdin, startTime);
     }
 
-    /**
-     * Attempts execution via local Node backend (/api/run) for near-instant native compiles
-     */
-    async _executeLocalServer(code, language, stdin = '', startTime = performance.now()) {
-        const isHttp = typeof window !== 'undefined' && 
-                       (window.location.protocol === 'http:' || window.location.protocol === 'https:');
-        if (!isHttp) return null;
+    /* ==================================================================
+       JavaScript — Web Worker
+       ================================================================== */
+
+    _runJS(code, stdin, startTime) {
+        return new Promise((resolve) => {
+            let settled = false;
+            let worker;
+
+            const finish = (res) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                try { worker.terminate(); } catch (_) {}
+                resolve(res);
+            };
+
+            const source = `
+                'use strict';
+                const out = [], err = [];
+                const fmt = (a) => {
+                    try {
+                        if (a instanceof Error) return a.stack || a.message;
+                        if (typeof a === 'object' && a !== null) return JSON.stringify(a, null, 2);
+                        if (typeof a === 'function') return '[Function ' + (a.name || 'anonymous') + ']';
+                        return String(a);
+                    } catch (_) { return String(a); }
+                };
+                const lines = String(${JSON.stringify(String(stdin || ''))}).split('\\n');
+                let cursor = 0;
+
+                const readNext = () => {
+                    if (cursor >= lines.length) {
+                        throw new Error('EOFError: program asked for more input than the Stdin tab provides.');
+                    }
+                    return lines[cursor++];
+                };
+                self.input = (...a) => { if (a.length) out.push(a.join(' ')); return readNext(); };
+                self.readLine = self.input;
+                self.prompt = self.input;
+                self.readAll = () => lines.slice(cursor).join('\\n');
+                self.print = (...a) => out.push(a.map(fmt).join(' '));
+                self.require = (m) => { throw new Error("require('" + m + "') is unavailable — JavaScript runs in your browser, not Node."); };
+
+                self.console = {
+                    log: (...a) => out.push(a.map(fmt).join(' ')),
+                    info: (...a) => out.push(a.map(fmt).join(' ')),
+                    debug: (...a) => out.push(a.map(fmt).join(' ')),
+                    warn: (...a) => out.push('[warn] ' + a.map(fmt).join(' ')),
+                    error: (...a) => err.push(a.map(fmt).join(' ')),
+                    table: (a) => out.push(fmt(a)),
+                    trace: (...a) => out.push(a.map(fmt).join(' ')),
+                };
+
+                try {
+                    const run = new Function(${JSON.stringify(code)});
+                    const ret = run();
+                    if (ret !== undefined) out.push('<- ' + fmt(ret));
+                } catch (e) {
+                    err.push(e && e.stack ? e.stack : String(e));
+                }
+
+                // flush pending microtasks / short timers before reporting
+                setTimeout(() => self.postMessage({ out: out.join('\\n'), err: err.join('\\n') }), 150);
+            `;
+
+            try {
+                const blob = new Blob([source], { type: 'text/javascript' });
+                worker = new Worker(URL.createObjectURL(blob));
+            } catch (e) {
+                resolve(this._result({
+                    success: false, compiler: 'V8 (Browser)', language: 'javascript',
+                    compilerError: 'Could not start the JavaScript sandbox: ' + e.message,
+                    exitCode: -1, startTime,
+                }));
+                return;
+            }
+
+            const timer = setTimeout(() => {
+                finish(this._result({
+                    success: false, compiler: 'V8 (Browser)', language: 'javascript',
+                    compilerError:
+                        `Timed out after ${this.LOCAL_TIMEOUT / 1000}s — the sandbox was stopped safely.\n` +
+                        'Infinite loops, or a very large computation, end up here.',
+                    stderr: 'Execution timed out',
+                    exitCode: 124, startTime,
+                }));
+            }, this.LOCAL_TIMEOUT);
+
+            worker.onmessage = (e) => {
+                const { out = '', err = '' } = e.data || {};
+                finish(this._result({
+                    success: !err,
+                    compiler: 'V8 (Browser Worker)',
+                    language: 'javascript',
+                    stdout: out ? out + '\n' : '',
+                    stderr: err,
+                    compilerError: err ? err : '',
+                    exitCode: err ? 1 : 0,
+                    startTime,
+                }));
+            };
+
+            worker.onerror = (e) => {
+                finish(this._result({
+                    success: false, compiler: 'V8 (Browser)', language: 'javascript',
+                    compilerError: e.message || 'Sandbox error',
+                    exitCode: 1, startTime,
+                }));
+            };
+        });
+    }
+
+    /* ==================================================================
+       Python — Pyodide inside a Web Worker
+       ================================================================== */
+
+    _ensurePyWorker() {
+        if (this._pyWorker) return this._pyWorker;
+
+        const indexURL = this.pyodideIndex;
+        const source = `
+            let pyodide = null;
+            let loading = null;
+
+            async function boot() {
+                if (pyodide) return pyodide;
+                if (!loading) {
+                    importScripts(${JSON.stringify(indexURL + 'pyodide.js')});
+                    loading = loadPyodide({ indexURL: ${JSON.stringify(indexURL)} });
+                }
+                pyodide = await loading;
+                self.postMessage({ type: 'ready' });
+                return pyodide;
+            }
+
+            self.onmessage = async (e) => {
+                const msg = e.data || {};
+                if (msg.type !== 'run') return;
+                const out = [], err = [];
+
+                try {
+                    const py = await boot();
+                    py.setStdout({ batched: (s) => out.push(s) });
+                    py.setStderr({ batched: (s) => err.push(s) });
+
+                    // Fresh stdin queue + fresh globals for every single run.
+                    const lines = String(msg.stdin || '').split('\\n');
+                    let cursor = 0;
+                    py.setStdin({ stdin: () => (cursor < lines.length ? lines[cursor++] : null) });
+
+                    const ns = py.globals.get('dict')();
+                    try {
+                        await py.runPythonAsync(msg.code, { globals: ns });
+                    } finally {
+                        ns.destroy();
+                    }
+
+                    self.postMessage({
+                        type: 'done', id: msg.id, ok: true,
+                        out: out.join('\\n'), err: err.join('\\n'),
+                    });
+                } catch (e2) {
+                    self.postMessage({
+                        type: 'done', id: msg.id, ok: false,
+                        out: out.join('\\n'),
+                        err: String((e2 && e2.message) || e2) + (err.length ? '\\n' + err.join('\\n') : ''),
+                    });
+                }
+            };
+        `;
+
+        const blob = new Blob([source], { type: 'text/javascript' });
+        this._pyWorker = new Worker(URL.createObjectURL(blob));
+        this._pyReady = false;
+        this._pySeq = 0;
+        this._pyPending = new Map();
+
+        this._pyWorker.onmessage = (e) => {
+            const msg = e.data || {};
+            if (msg.type === 'ready') {
+                this._pyReady = true;
+                if (this._onPyReady) this._onPyReady();
+                return;
+            }
+            if (msg.type === 'done') {
+                const pending = this._pyPending.get(msg.id);
+                if (pending) {
+                    this._pyPending.delete(msg.id);
+                    pending(msg);
+                }
+            }
+        };
+
+        this._pyWorker.onerror = (e) => {
+            const err = e.message || 'Python worker crashed';
+            this._pyPending.forEach((pending) => pending({ ok: false, out: '', err }));
+            this._pyPending.clear();
+            this._killPyWorker();
+        };
+
+        return this._pyWorker;
+    }
+
+    _killPyWorker() {
+        if (this._pyWorker) {
+            try { this._pyWorker.terminate(); } catch (_) {}
+        }
+        this._pyWorker = null;
+        this._pyReady = false;
+        this._pyPending = new Map();
+    }
+
+    _runPython(code, stdin, startTime, onStatus) {
+        return new Promise((resolve) => {
+            let worker;
+            try {
+                worker = this._ensurePyWorker();
+            } catch (e) {
+                resolve(null);
+                return;
+            }
+
+            const id = ++this._pySeq;
+            let settled = false;
+
+            const done = (res) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                this._pyPending.delete(id);
+                resolve(this._result({ language: 'python', startTime, ...res }));
+            };
+
+            const timer = setTimeout(() => {
+                // Terminate: this is the only way to stop synchronous Python/WASM.
+                this._killPyWorker();
+                done({
+                    success: false,
+                    compiler: 'Pyodide (WebAssembly)',
+                    compilerError:
+                        `Timed out after ${this.LOCAL_TIMEOUT / 1000}s — the Python runtime was restarted.\n` +
+                        'The next run will reload it (a few seconds).',
+                    stderr: 'Execution timed out',
+                    exitCode: 124,
+                });
+            }, this.LOCAL_TIMEOUT);
+
+            this._pyPending.set(id, (msg) => {
+                done({
+                    success: Boolean(msg.ok),
+                    compiler: 'Pyodide (WebAssembly Python 3.12)',
+                    stdout: msg.out ? msg.out + '\n' : '',
+                    stderr: msg.err,
+                    compilerError: msg.ok ? '' : msg.err,
+                    exitCode: msg.ok ? 0 : 1,
+                });
+            });
+
+            if (!this._pyReady) {
+                onStatus('Loading Python runtime (one-time, ~5 MB)…');
+                this._onPyReady = () => onStatus('Python runtime ready');
+            } else {
+                onStatus('Running…');
+            }
+
+            worker.postMessage({ type: 'run', id, code, stdin: stdin || '' });
+        });
+    }
+
+    /* ==================================================================
+       Optional local compiler server (serve.js)
+       ================================================================== */
+
+    async _runLocalServer(code, language, stdin, startTime) {
+        // Only bother when we are genuinely served from localhost — in
+        // production this endpoint 404s and every run wasted a round-trip.
+        if (typeof window === 'undefined') return null;
+        const host = window.location.hostname;
+        if (!(host === 'localhost' || host === '127.0.0.1' || host === '[::1]')) return null;
 
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 12000);
@@ -292,120 +527,62 @@ fn main() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ code, language, stdin }),
-                signal: controller.signal
+                signal: controller.signal,
             });
             clearTimeout(timeoutId);
-
             if (!res.ok) return null;
-
             const data = await res.json();
-            if (!data || data.supportedLocally === false) {
-                return null;
-            }
-
-            return data;
-        } catch (e) {
+            if (!data || data.supportedLocally === false) return null;
+            return { ...data, durationMs: data.durationMs || Math.round(performance.now() - startTime) };
+        } catch (_) {
             clearTimeout(timeoutId);
             return null;
         }
     }
 
-    /**
-     * Executes Python directly in-browser using Pyodide WebAssembly
-     */
-    async _executePythonInBrowser(code, startTime, stdin = '') {
-        if (typeof loadPyodide === 'undefined') {
-            throw new Error('Pyodide library not available in environment');
-        }
+    /* ==================================================================
+       Remote Wandbox
+       ================================================================== */
 
-        // Lazy initialize Pyodide instance
-        if (!this._pyodidePromise) {
-            this._pyodidePromise = loadPyodide({
-                indexURL: "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/"
-            });
-        }
-
-        const pyodide = await this._pyodidePromise;
-        const logs = [];
-        const errors = [];
-
-        // Setup custom stdout/stderr callbacks
-        pyodide.setStdout({ batched: (msg) => logs.push(msg) });
-        pyodide.setStderr({ batched: (msg) => errors.push(msg) });
-
-        // Handle standard input if provided
-        if (stdin) {
-            try {
-                pyodide.setStdin({
-                    stdin: () => {
-                        if (!this._stdinLines) {
-                            this._stdinLines = stdin.split('\n');
-                        }
-                        return this._stdinLines.length ? this._stdinLines.shift() : null;
-                    }
-                });
-            } catch (e) {
-                // Ignore stdin setup error if unsupported
-            }
-        }
-
-        let isSuccess = true;
-        let errMsg = '';
-
-        try {
-            await pyodide.runPythonAsync(code);
-        } catch (err) {
-            isSuccess = false;
-            errMsg = err.message || String(err);
-            errors.push(errMsg);
-        }
-
-        const duration = Math.max(1, Math.round(performance.now() - startTime));
-
-        return {
-            success: isSuccess,
-            compiler: 'Pyodide (WebAssembly Python 3.12 in Browser)',
-            language: 'python',
-            stdout: logs.join('\n') + (logs.length ? '\n' : ''),
-            stderr: errors.join('\n'),
-            compilerError: isSuccess ? '' : errMsg,
-            exitCode: isSuccess ? 0 : 1,
-            durationMs: duration,
-            isLocal: true
-        };
+    /** Wandbox writes the file as prog.java / prog.cc, so a `public class X`
+     *  cannot compile unless X is the file name. Drop the modifier — the class
+     *  still compiles fine as package-private. */
+    _normalizeJava(code) {
+        return code
+            .split('\n')
+            .map((line) => (/^public\s+(?:(?:final|abstract)\s+)?(?:class|interface|enum)\s+\w+/.test(line)
+                ? line.replace(/^public\s+/, '')
+                : line))
+            .join('\n');
     }
 
-    /**
-     * Executes code via Wandbox with automatic retry on transient OCI / container overload errors
-     */
-    async _executeWandboxWithRetry(code, language, stdin = '', startTime = performance.now(), retries = 2) {
-        let compiler = this.compilers[language] || this.compilers['python'];
+    async _runWandbox(code, language, stdin, startTime, retries = 2) {
+        let compiler = this.compilers[language] || this.compilers.python;
         let lastError = null;
+        const payloadCode = language === 'java' ? this._normalizeJava(code) : code;
 
         for (let attempt = 1; attempt <= retries; attempt++) {
             try {
-                // If retrying C++ or C, try alternate compiler head if container failed on attempt 1
                 if (attempt > 1 && language === 'cpp' && compiler === 'gcc-13.2.0') {
                     compiler = 'gcc-head';
                 }
 
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 16000);
+                const timeoutId = setTimeout(() => controller.abort(), this.REMOTE_TIMEOUT);
 
                 const payload = {
-                    code: code,
-                    compiler: compiler,
+                    code: payloadCode,
+                    compiler,
                     stdin: stdin || '',
-                    'compiler-option-raw': (language === 'cpp' || language === 'c') ? '-O0' : ''
+                    'compiler-option-raw': (language === 'cpp' || language === 'c') ? '-O0' : '',
                 };
 
                 const response = await fetch(this.apiEndpoint, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload),
-                    signal: controller.signal
+                    signal: controller.signal,
                 });
-
                 clearTimeout(timeoutId);
 
                 if (!response.ok) {
@@ -413,151 +590,79 @@ fn main() {
                 }
 
                 const data = await response.json();
-                const duration = Math.round(performance.now() - startTime);
-
                 const stdout = data.program_output || '';
                 const stderr = data.program_error || '';
                 const compilerErr = data.compiler_error || data.compiler_message || '';
                 const exitStatus = data.status;
 
-                // Check for transient container overload errors (e.g., OCI runtime error, crun: clone)
-                const fullErr = (compilerErr + '\n' + stderr);
-                const isOverloadError = fullErr.includes('OCI runtime error') || 
-                                       fullErr.includes('Resource temporarily unavailable') || 
-                                       fullErr.includes('crun: clone') || 
-                                       exitStatus === '126' ||
-                                       exitStatus === 126;
+                const fullErr = compilerErr + '\n' + stderr;
+                const isOverload =
+                    fullErr.includes('OCI runtime error') ||
+                    fullErr.includes('Resource temporarily unavailable') ||
+                    fullErr.includes('crun: clone') ||
+                    exitStatus === '126' || exitStatus === 126;
 
-                if (isOverloadError && attempt < retries) {
-                    console.warn(`Wandbox busy (attempt ${attempt}/${retries}). Retrying with alternate compiler in 800ms...`);
-                    await new Promise(r => setTimeout(r, 800));
-                    continue; // Retry
+                if (isOverload && attempt < retries) {
+                    await new Promise((r) => setTimeout(r, 800));
+                    continue;
                 }
 
-                // If still overloaded on final attempt, format user-friendly message
-                let finalCompilerErr = compilerErr;
-                if (isOverloadError) {
-                    finalCompilerErr = '⚠️ The remote compiler sandbox is temporarily experiencing high traffic (container limit reached).\nClick "Run Code" again in a few seconds to retry, or run via local server for instant execution.';
-                }
+                const finalCompilerErr = isOverload
+                    ? 'The remote compiler sandbox is busy right now.\nTry again in a few seconds.'
+                    : compilerErr;
 
-                const isSuccess = (exitStatus === '0' || exitStatus === 0) && !compilerErr && !isOverloadError;
+                const isSuccess = (exitStatus === '0' || exitStatus === 0) && !compilerErr && !isOverload;
 
-                return {
+                return this._result({
                     success: isSuccess,
-                    compiler: `${compiler} (Wandbox Remote Sandbox)`,
-                    language: language,
-                    stdout: stdout,
-                    stderr: stderr,
+                    compiler: `${compiler} · remote sandbox`,
+                    language,
+                    stdout,
+                    stderr,
                     compilerError: finalCompilerErr,
                     exitCode: exitStatus !== undefined ? exitStatus : (isSuccess ? 0 : 1),
-                    durationMs: duration,
-                    isLocal: false
-                };
+                    startTime,
+                });
             } catch (err) {
                 lastError = err;
-                if (attempt < retries) {
-                    await new Promise(r => setTimeout(r, 800));
-                }
+                if (attempt < retries) await new Promise((r) => setTimeout(r, 800));
             }
         }
 
-        const duration = Math.round(performance.now() - startTime);
-        let errorMsg = lastError ? lastError.message : 'Unknown execution failure';
-        if (lastError && lastError.name === 'AbortError') {
-            errorMsg = 'Execution timed out (limit: 18 seconds). Check for infinite loops.';
-        }
+        const timedOut = lastError && lastError.name === 'AbortError';
+        const message = timedOut
+            ? `No response after ${this.REMOTE_TIMEOUT / 1000}s. The compiler sandbox may be busy — try again.`
+            : (lastError ? lastError.message : 'Unknown execution failure');
 
-        return {
+        return this._result({
             success: false,
-            compiler: compiler,
-            language: language,
-            stdout: '',
-            stderr: errorMsg,
-            compilerError: `Compiler Connection Error:\n${errorMsg}`,
+            compiler,
+            language,
+            stderr: message,
+            compilerError: `Compiler connection error\n${message}`,
             exitCode: -1,
-            durationMs: duration,
-            isLocal: false
-        };
+            startTime,
+        });
     }
 
-    /**
-     * Executes JavaScript safely in-browser with console capturing
-     */
-    _executeLocalJS(code, startTime) {
-        const logs = [];
-        const errors = [];
-        
-        // Capture console outputs
-        const originalLog = console.log;
-        const originalError = console.error;
-        const originalWarn = console.warn;
-        const originalInfo = console.info;
+    /* ==================================================================
+       Helpers
+       ================================================================== */
 
-        const stringifyArg = (arg) => {
-            if (typeof arg === 'object' && arg !== null) {
-                try {
-                    return JSON.stringify(arg, null, 2);
-                } catch (e) {
-                    return String(arg);
-                }
-            }
-            return String(arg);
-        };
-
-        console.log = (...args) => {
-            logs.push(args.map(stringifyArg).join(' '));
-        };
-        console.info = (...args) => {
-            logs.push('[INFO] ' + args.map(stringifyArg).join(' '));
-        };
-        console.warn = (...args) => {
-            logs.push('[WARN] ' + args.map(stringifyArg).join(' '));
-        };
-        console.error = (...args) => {
-            errors.push('[ERROR] ' + args.map(stringifyArg).join(' '));
-        };
-
-        let result = null;
-        let isSuccess = true;
-
-        try {
-            // Execute in an isolated function wrapper
-            const runnerFn = new Function(code);
-            result = runnerFn();
-            if (result !== undefined) {
-                logs.push(`<- Return: ${stringifyArg(result)}`);
-            }
-        } catch (err) {
-            isSuccess = false;
-            errors.push(err.stack || err.message);
-        } finally {
-            // Restore console
-            console.log = originalLog;
-            console.error = originalError;
-            console.warn = originalWarn;
-            console.info = originalInfo;
-        }
-
-        const duration = Math.max(1, Math.round(performance.now() - startTime));
-
+    _result({ success, compiler, language, stdout = '', stderr = '', compilerError = '', exitCode = 0, startTime }) {
         return {
-            success: isSuccess,
-            compiler: 'V8 (In-Browser Web Engine)',
-            language: 'javascript',
-            stdout: logs.join('\n') + (logs.length ? '\n' : ''),
-            stderr: errors.join('\n'),
-            compilerError: isSuccess ? '' : errors.join('\n'),
-            exitCode: isSuccess ? 0 : 1,
-            durationMs: duration,
-            isLocal: true
+            success: Boolean(success),
+            compiler,
+            language,
+            stdout,
+            stderr,
+            compilerError,
+            exitCode,
+            durationMs: Math.max(1, Math.round(performance.now() - startTime)),
+            isLocal: !/remote sandbox/.test(compiler || ''),
         };
     }
 }
 
-// Export for browser and node environments
-if (typeof window !== 'undefined') {
-    window.CodeRunner = CodeRunner;
-}
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = CodeRunner;
-}
+if (typeof window !== 'undefined') window.CodeRunner = CodeRunner;
+if (typeof module !== 'undefined' && module.exports) module.exports = CodeRunner;

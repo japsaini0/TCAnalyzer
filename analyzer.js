@@ -27,6 +27,12 @@ class ComplexityAnalyzer {
             };
         }
 
+        // Reject input with no analysable content (emoji, punctuation, whitespace).
+        const alnumCount = (code.match(/[A-Za-z0-9]/g) || []).length;
+        if (alnumCount < 3) {
+            return { error: 'Not enough code to analyse. Paste a function or loop and try again.' };
+        }
+
         const detectedLang = language === 'auto' ? this._detectLanguage(code) : language;
         const isPython = detectedLang === 'python';
         const norm = this._normalize(code, isPython);
@@ -139,6 +145,14 @@ class ComplexityAnalyzer {
             const s = pats.reduce((a, p) => a + (p.test(code) ? 1 : 0), 0);
             if (s > bestScore) { bestScore = s; best = lang; }
         }
+
+        // C vs C++ disambiguation: C headers/IO with no C++-only constructs.
+        const cOnly  = /#include\s*<(?:stdio|stdlib|string|math|ctype|conio|stdbool)\.h>|\b(?:printf|scanf|malloc|calloc|realloc|fgets|puts|fprintf)\s*\(/;
+        const cppOnly = /#include\s*<(?:iostream|vector|string|algorithm|map|set|queue|stack|unordered_map|unordered_set)>|\b(?:cout|cin|std::|vector\s*<|unordered_map|unordered_set|template\s*<|public\s*:|private\s*:)/;
+        if (best === 'cpp' && cOnly.test(code) && !cppOnly.test(code)) {
+            best = 'c';
+        }
+
         return bestScore >= 1 ? best : 'pseudo';
     }
 
@@ -322,7 +336,69 @@ class ComplexityAnalyzer {
         if (isPython) {
             return this._buildPythonLoopTree(code);
         }
+        if (/^\s*(?:FOR|WHILE|REPEAT|LOOP|FOR EACH)\b/m.test(code)) {
+            return this._buildPseudoLoopTree(code);
+        }
         return this._buildCLoopTree(code);
+    }
+
+    /**
+     * Indentation-based loop tree for pseudocode (FOR x = 0 TO n DO / WHILE c DO).
+     */
+    _buildPseudoLoopTree(code) {
+        const lines = code.split('\n');
+        const headerRe = /^\s*(FOR(?:\s+EACH)?\b.*\bDO\b|WHILE\b.*\bDO\b|REPEAT\b|LOOP\b|END\s*\w*)/i;
+        const loops = [];
+        const stack = [];
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (!line.trim()) continue;
+            const indent = line.search(/\S/);
+            const m = line.match(headerRe);
+            if (!m) continue;
+            const kw = m[1].toUpperCase();
+
+            if (/^END\b/.test(kw)) {
+                while (stack.length && stack[stack.length - 1].indent >= indent) stack.pop();
+                continue;
+            }
+            while (stack.length && indent <= stack[stack.length - 1].indent) stack.pop();
+            if (!/^(?:FOR|WHILE|REPEAT|LOOP)\b/.test(kw)) continue;
+
+            const header = line.trim();
+            const node = {
+                index: loops.length, lineNo: i, indent, headerLine: header, body: '',
+                iterType: 'linear', hasEarlyReturn: false, hasBreak: false,
+                isUncertain: false, assumption: undefined, children: [], parentIdx: -1,
+                depth: 1, endLine: lines.length,
+            };
+
+            const toConst = /\bTO\s+\d+\b/i.test(header);
+            if (/^FOR\b/i.test(header) && toConst) node.iterType = 'constant';
+            else if (/^WHILE\b/i.test(header) && /\/\s*2|\/\/\s*2|HALV/i.test(header)) node.iterType = 'logarithmic';
+
+            if (stack.length) {
+                node.parentIdx = stack[stack.length - 1].index;
+                loops[node.parentIdx].children.push(node);
+            }
+            loops.push(node);
+            stack.push(node);
+        }
+
+        for (const node of loops) {
+            let end = lines.length;
+            for (const other of loops) {
+                if (other.lineNo > node.lineNo && other.indent <= node.indent) end = Math.min(end, other.lineNo);
+            }
+            node.endLine = end;
+            node.body = lines.slice(node.lineNo + 1, end).join('\n');
+            node.hasEarlyReturn = /\bRETURN\b|\bEXIT\b|\bBREAK\b/i.test(node.body);
+        }
+
+        const setDepth = (n, d) => { n.depth = d; n.children.forEach(c => setDepth(c, d + 1)); };
+        loops.filter(n => n.parentIdx === -1).forEach(n => setDepth(n, 1));
+        return loops.filter(n => n.parentIdx === -1);
     }
 
     _buildCLoopTree(code) {
@@ -713,9 +789,10 @@ class ComplexityAnalyzer {
             /\b\w+\s*(?:\/=|>>=|\/\/=)\s*\d+/,
             /\b\w+\s*=\s*\w+\s*(?:\/|>>|\/\/)\s*\d+/,
             /\b\w+\s*=\s*(?:Math\.floor|Math\.trunc)\s*\(\s*\w+\s*\/\s*\d+\s*\)/,
-            /(?:lo|left|low|start|l)\s*=\s*(?:mid|middle)/,
-            /(?:hi|right|high|end|r)\s*=\s*(?:mid|middle)/,
-            /mid\s*=\s*[\w(]+\s*[+]\s*[\w)]+\s*(?:\/|\/\/)\s*2/,
+            /(?:lo|left|low|start|l)\s*=\s*(?:m|mid|middle)\s*[+-]?\s*\d?\b/,
+            /(?:hi|right|high|end|r)\s*=\s*(?:m|mid|middle)\s*[+-]?\s*\d?\b/,
+            /(?:m|mid|middle)\s*=\s*[\w(]+\s*[+]\s*[\w)]+\s*(?:\/|\/\/)\s*2/,
+            /(?:l|lo|left|low)\s*=\s*(?:m|mid|middle)\s*[+]\s*1/,
         ];
         if (halvingPats.some(p => p.test(body))) {
             return { type: 'logarithmic', isUncertain: false };
@@ -911,14 +988,16 @@ class ComplexityAnalyzer {
             assumptions: [],
         };
 
+        // Memoisation must be proven *inside* the recursive function (or by a
+        // decorator directly above it). Scanning the whole file let any stray
+        // `!= -1`, `visited`, `dp` or even a comment turn O(2^n) into O(n).
         const memoSignals = [
-            /\bmemo\b/i, /\bcache\b/i, /\bdp\s*[\[({]/, /\bdp\b/,
-            /@lru_cache\b/, /@cache\b/, /\bfunctools\b/,
-            /\bmemoize\b/i,
-            /!=\s*-1\b/, /!=\s*INT_MAX\b/, /!=\s*nullptr\b/,
-            /\bvisited\b/,
+            /\b(?:memo|cache)\w*\s*[\[(]/i,
+            /\bmemo(?:ize)?\s*\.\s*(?:get|set|has|count)\b/i,
+            /\b(?:memo|cache)\w*\s*\.\s*(?:count|find|insert|put|get|has)\b/i,
+            /@(?:functools\.)?(?:lru_)?cache\b/, /@memoize\b/,
+            /\bdp\s*\[[^\]]+\]\s*=/,
         ];
-        const hasMemo = memoSignals.some(p => p.test(code));
 
         for (const fn of funcs) {
             const callRe = new RegExp(`\\b${fn.name}\\s*\\(`, 'g');
@@ -927,6 +1006,11 @@ class ComplexityAnalyzer {
 
             result.isRecursive = true;
             result.functionName = fn.name;
+
+            // Look only at this function's own body + its decorators.
+            const decorators = code.slice(Math.max(0, fn.offset - 120), fn.offset);
+            const hasMemo = memoSignals.some(p => p.test(fn.body)) ||
+                            /@(?:functools\.)?(?:lru_)?cache\b|@memoize\b/.test(decorators);
             result.hasMemoization = hasMemo;
 
             const body = fn.body;
@@ -1179,15 +1263,30 @@ class ComplexityAnalyzer {
             return { notation: 'O(1)', bestCase: 'O(1)', worstCase: 'O(1)', averageCase: 'O(1)', isUncertain: false, assumptions: [] };
         }
 
-        if (ds.usesGraph && (ds.usesQueue || ds.usesStack || ds.usesSet || ds.usesHashMap)) {
-            return {
-                notation: 'O(V + E)',
-                bestCase: 'O(1)',
-                worstCase: 'O(V + E)',
-                averageCase: 'O(V + E)',
-                isUncertain: false,
-                assumptions: [],
-            };
+        // O(V+E) only when the code actually looks like a graph traversal: a
+        // queue/stack driven loop AND iteration over an adjacency list. Before,
+        // the mere presence of "graph" + a queue forced O(V+E) on nested loops.
+        if (ds.usesGraph && (ds.usesQueue || ds.usesStack)) {
+            const hasTraversalLoop =
+                /while\s*\(\s*!?\s*\w+\s*\.\s*(?:empty|isEmpty)\s*\(\s*\)\s*\)/.test(code) ||
+                /while\s+\w+\s*:/.test(code) ||
+                /while\s*\(\s*\w+\s*\.\s*size\s*\(\s*\)\s*>\s*0\s*\)/.test(code);
+            const hasAdjacencyIteration =
+                /\b(?:for|while)\s*\([^)]*\b(?:graph|adj|g)\s*\[/.test(code) ||
+                /\bfor\s+\w+\s+in\s+(?:graph|adj)\w*\s*\[/.test(code) ||
+                /\bneighbo(?:u)?rs?\b/.test(code) ||
+                /\bfor\s+\w+\s+in\s+\w+\s*\.\s*(?:neighbors|adj)\b/.test(code);
+
+            if (hasTraversalLoop && hasAdjacencyIteration) {
+                return {
+                    notation: 'O(V + E)',
+                    bestCase: 'O(1)',
+                    worstCase: 'O(V + E)',
+                    averageCase: 'O(V + E)',
+                    isUncertain: false,
+                    assumptions: [],
+                };
+            }
         }
 
         // Recursion Handling
@@ -1301,6 +1400,21 @@ class ComplexityAnalyzer {
         }
 
         if (ds.usesHashMap || ds.usesSet || ds.usesOrderedMap || ds.usesOrderedSet || ds.usesHeap || ds.usesQueue || ds.usesStack) {
+            sp = this._maxC(sp, { n: 1 });
+        }
+
+        // Generic container creation — previously only the literal word "dict"
+        // counted, so `seen = {}` was reported as O(1) auxiliary space.
+        const containerAlloc = [
+            /=\s*\{\s*\}/,
+            /=\s*(?:set|dict|list)\s*\(\s*\)/,
+            /=\s*\[\s*\]/,
+            /=\s*new\s+(?:Map|Set|Array|ArrayList|HashMap|HashSet|LinkedList|Deque|Stack|Queue)\b/,
+            /:=\s*make\s*\(\s*(?:map|\[\])/,
+            /=\s*(?:HashMap|HashSet|Vec)::new\s*\(\s*\)/,
+            /\.(?:append|push|push_back|add|put|insert)\s*\(/,
+        ];
+        if (containerAlloc.some(p => p.test(code))) {
             sp = this._maxC(sp, { n: 1 });
         }
 

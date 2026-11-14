@@ -1,258 +1,260 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>⚡ TC Analyzer Studio — Live Code Compiler & Complexity Engine</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <title>TC Analyzer — Code Playground &amp; Big O Complexity Engine</title>
+
+    <meta name="description" content="Write, run and analyse code in 7 languages while getting live Big O time and space complexity, runtime benchmarks and optimisation tips. Runs in your browser.">
+    <meta name="theme-color" content="#ffffff">
+    <link rel="canonical" href="https://www.tcanalyzer.tech/">
+
+    <!-- Open Graph / social -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://www.tcanalyzer.tech/">
+    <meta property="og:title" content="TC Analyzer — Code Playground &amp; Big O Complexity Engine">
+    <meta property="og:description" content="Run code in 7 languages while inspecting live Big O time and space complexity side by side.">
+    <meta property="og:site_name" content="TC Analyzer">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="TC Analyzer — Code Playground &amp; Big O Complexity Engine">
+    <meta name="twitter:description" content="Run code in 7 languages while inspecting live Big O time and space complexity side by side.">
+
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230f9d8f'/><path d='M55 14 28 56h18l-6 30 32-44H52z' fill='white'/></svg>">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <!-- Animated background particles -->
-    <canvas id="particles"></canvas>
 
-    <!-- Header -->
-    <header class="header">
-        <div class="header-left">
-            <div class="logo">
-                <span class="logo-icon">⚡</span>
-                <span class="logo-text">TC<span class="logo-accent">Analyzer</span></span>
-                <span class="badge-edition">Compiler Edition</span>
-            </div>
-        </div>
-        <nav class="header-nav">
-            <button class="nav-btn active" data-tab="analyzer">IDE & Analyzer</button>
-            <button class="nav-btn" data-tab="examples">Examples</button>
-            <button class="nav-btn" data-tab="learn">Learn Big O</button>
+    <!-- ===================== TOP BAR ===================== -->
+    <header class="topbar">
+        <a class="brand" href="./" aria-label="TC Analyzer home">
+            <span class="brand-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M13.5 2 4 14h6l-1 8 9.5-12h-6z"/></svg>
+            </span>
+            <span class="brand-name">TC<span>Analyzer</span></span>
+            <span class="brand-tag">Compiler</span>
+        </a>
+
+        <nav class="tabs" role="tablist" aria-label="Sections">
+            <button class="tab-btn is-active" data-tab="analyzer" role="tab" aria-selected="true">Playground</button>
+            <button class="tab-btn" data-tab="examples" role="tab" aria-selected="false">Examples</button>
+            <button class="tab-btn" data-tab="learn" role="tab" aria-selected="false">Big&nbsp;O Guide</button>
         </nav>
-        <div class="header-right">
-            <button class="theme-toggle" id="themeToggle" title="Toggle theme">
-                <span class="theme-icon">🌙</span>
+
+        <div class="topbar-actions">
+            <span class="run-counter" title="Executions this browser"><span id="queryCount">0</span>&nbsp;runs</span>
+            <button class="icon-btn theme-btn" id="themeToggle" aria-label="Switch to dark theme" aria-pressed="false">
+                <svg class="icon-moon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+                <svg class="icon-sun" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/></svg>
             </button>
-            <div class="query-counter">
-                <span id="queryCount">0</span> / ∞ executions
-            </div>
         </div>
     </header>
 
-    <!-- Main Content -->
-    <main class="main-content">
+    <main class="page">
 
-        <!-- ====== ANALYZER & COMPILER TAB ====== -->
-        <section class="tab-content active" id="tab-analyzer">
+        <!-- ===================== PLAYGROUND ===================== -->
+        <section class="tab-panel is-active" id="tab-analyzer" role="tabpanel">
+
             <div class="hero">
-                <h1 class="hero-title">
-                    Write, Compile & Analyze
-                    <span class="gradient-text">Live Complexity</span>
-                </h1>
-                <p class="hero-subtitle">
-                    Run your code in real-time across 7+ languages while inspecting theoretical Big O time & space complexity side-by-side.
+                <p class="eyebrow">Compiler edition</p>
+                <h1>Run it. Then understand <em>why</em> it's slow.</h1>
+                <p class="hero-sub">
+                    Execute code in 7 languages and get the Big O time &amp; space complexity beside it —
+                    live, as you type.
                 </p>
             </div>
 
-            <div class="analyzer-grid">
-                <!-- Code Input & Terminal Panel -->
-                <div class="panel code-panel">
-                    <div class="panel-header">
-                        <div class="panel-title">
-                            <span class="panel-icon">💻</span>
-                            Code Editor & Compiler
+            <div class="workspace">
+
+                <!-- ---------- EDITOR ---------- -->
+                <section class="card editor-card" aria-label="Code editor">
+                    <header class="card-head">
+                        <div class="card-title">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="8 6 3 12 8 18"/><polyline points="16 6 21 12 16 18"/></svg>
+                            <span>Code</span>
                         </div>
-                        <div class="panel-actions">
-                            <select id="languageSelect" class="language-select" title="Select programming language">
-                                <option value="auto">Auto Detect</option>
-                                <option value="python">Python 3.12</option>
-                                <option value="javascript">JavaScript (V8/Node)</option>
-                                <option value="cpp">C++ (GCC 13)</option>
-                                <option value="c">C (GCC 13)</option>
-                                <option value="java">Java (JDK 22)</option>
-                                <option value="go">Go 1.23</option>
-                                <option value="rust">Rust 1.82</option>
-                                <option value="pseudo">Pseudocode</option>
-                            </select>
-                            <button class="action-pill-btn" id="templateBtn" title="Load a runnable starter template for this language">
-                                <span>📄 Template</span>
+                        <div class="card-tools">
+                            <label class="select-wrap">
+                                <span class="sr-only">Programming language</span>
+                                <select id="languageSelect">
+                                    <option value="auto">Auto detect</option>
+                                    <option value="python">Python 3.12</option>
+                                    <option value="javascript">JavaScript (Browser)</option>
+                                    <option value="cpp">C++ (GCC 13)</option>
+                                    <option value="c">C (GCC 13)</option>
+                                    <option value="java">Java (JDK 22)</option>
+                                    <option value="go">Go 1.23</option>
+                                    <option value="rust">Rust 1.82</option>
+                                    <option value="pseudo">Pseudocode</option>
+                                </select>
+                                <svg class="select-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+                            </label>
+
+                            <button class="icon-btn" id="templateBtn" title="Load a runnable starter template">
+                                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/></svg>
                             </button>
-                            <button class="icon-btn" id="clearBtn" title="Clear code">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                            <button class="icon-btn" id="clearBtn" title="Clear editor">
+                                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/><path d="M10 11v5M14 11v5"/></svg>
                             </button>
                             <button class="icon-btn" id="copyBtn" title="Copy code">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                             </button>
                         </div>
-                    </div>
+                    </header>
 
-                    <!-- Editor -->
-                    <div class="code-editor-wrapper">
-                        <div class="line-numbers" id="lineNumbers">1</div>
-                        <textarea 
-                            id="codeInput" 
-                            class="code-editor" 
-                            placeholder="# Write or paste your code here...
-# Click 'Run Code' (Shift+Enter) to compile and execute
-# Click 'Analyze Complexity' (Ctrl+Enter) to evaluate Big-O notation"
+                    <div class="editor-shell">
+                        <pre class="gutter" id="lineNumbers" aria-hidden="true">1</pre>
+                        <textarea
+                            id="codeInput"
+                            class="code-editor"
+                            aria-label="Code editor"
                             spellcheck="false"
-                        ></textarea>
+                            autocapitalize="off"
+                            autocorrect="off"
+                            autocomplete="off"
+                            placeholder="// Paste code here, or press the template icon above.
+// Shift + Enter  → run
+// Ctrl  + Enter  → analyse complexity"></textarea>
                     </div>
 
-                    <!-- Action Toolbar -->
-                    <div class="panel-toolbar">
-                        <div class="toolbar-left">
-                            <div class="char-count">
-                                <span id="charCount">0</span> chars · <span id="lineCount">0</span> lines
-                            </div>
-                            <label class="live-toggle" title="Continuously analyze Big-O complexity as you type">
-                                <input type="checkbox" id="liveToggle" checked>
-                                <span class="toggle-slider"></span>
-                                <span class="toggle-label">⚡ Live Big O</span>
-                            </label>
-                        </div>
-
-                        <div class="btn-group">
-                            <button class="btn btn-run" id="runBtn" title="Run code (Shift + Enter)">
-                                <span class="btn-content">
-                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                                    Run Code
-                                </span>
-                                <span class="btn-loading" style="display:none;">
-                                    <div class="spinner"></div>
-                                    Running...
-                                </span>
-                            </button>
-
-                            <button class="btn btn-run-analyze" id="runAnalyzeBtn" title="Run code & analyze complexity simultaneously (Ctrl + Shift + Enter)">
-                                <span class="btn-content">
-                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                                    Run & Analyze
-                                </span>
-                                <span class="btn-loading" style="display:none;">
-                                    <div class="spinner"></div>
-                                    Executing...
-                                </span>
-                            </button>
-
-                            <button class="btn btn-analyze" id="analyzeBtn" title="Analyze time and space complexity (Ctrl + Enter)">
-                                <span class="btn-content">
-                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                                    Analyze Big O
-                                </span>
-                                <span class="btn-loading" style="display:none;">
-                                    <div class="spinner"></div>
-                                    Analyzing...
-                                </span>
-                            </button>
-                        </div>
+                    <div class="editor-meta">
+                        <span class="meta-text"><span id="charCount">0</span> chars · <span id="lineCount">0</span> <span id="lineWord">lines</span></span>
+                        <label class="switch" title="Re-analyse complexity as you type">
+                            <input type="checkbox" id="liveToggle" checked>
+                            <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+                            <span class="switch-label">Live Big O</span>
+                        </label>
                     </div>
 
-                    <!-- Integrated Terminal & Console -->
-                    <div class="terminal-container">
-                        <div class="terminal-header">
-                            <div class="terminal-tabs">
-                                <button class="term-tab active" data-term-tab="output">
-                                    <span class="term-status-dot idle" id="termStatusDot"></span>
-                                    <span>Console Output</span>
-                                </button>
-                                <button class="term-tab" data-term-tab="stdin">
-                                    <span>Standard Input (stdin)</span>
-                                </button>
-                            </div>
+                    <div class="action-bar">
+                        <button class="btn btn-primary" id="runBtn" title="Run code (Shift + Enter)">
+                            <span class="btn-content">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l13-7.5z"/></svg>
+                                Run
+                            </span>
+                            <span class="btn-loading"><span class="spinner"></span>Running</span>
+                        </button>
+                        <button class="btn btn-secondary" id="runAnalyzeBtn" title="Run and analyse (Ctrl + Shift + Enter)">
+                            <span class="btn-content">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 4 14h6l-1 8 10-12h-6z"/></svg>
+                                Run &amp; analyse
+                            </span>
+                            <span class="btn-loading"><span class="spinner"></span>Running</span>
+                        </button>
+                        <button class="btn btn-ghost" id="analyzeBtn" title="Analyse complexity only (Ctrl + Enter)">
+                            <span class="btn-content">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l5-5 4 3 6-7"/><path d="M15 8h3v3"/></svg>
+                                Analyse
+                            </span>
+                            <span class="btn-loading"><span class="spinner"></span>Analysing</span>
+                        </button>
+                    </div>
 
-                            <div class="terminal-meta">
-                                <span class="term-meta-chip" id="termMetaChip" style="display:none;"></span>
-                                <button class="icon-btn sm" id="copyTermBtn" title="Copy output">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                    <!-- ---------- CONSOLE ---------- -->
+                    <div class="console">
+                        <div class="console-head">
+                            <div class="console-tabs" role="tablist" aria-label="Console tabs">
+                                <button class="console-tab is-active" data-term-tab="output" role="tab" aria-selected="true">
+                                    <span class="status-dot is-idle" id="termStatusDot"></span>Output
                                 </button>
-                                <button class="icon-btn sm" id="clearTermBtn" title="Clear console">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                                <button class="console-tab" data-term-tab="stdin" role="tab" aria-selected="false">Stdin</button>
+                            </div>
+                            <div class="console-tools">
+                                <span class="console-chip" id="termMetaChip" hidden></span>
+                                <button class="icon-btn icon-btn-dark" id="copyTermBtn" title="Copy output">
+                                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                </button>
+                                <button class="icon-btn icon-btn-dark" id="clearTermBtn" title="Clear output">
+                                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
                                 </button>
                             </div>
                         </div>
 
-                        <!-- Console Output Tab Pane -->
-                        <div class="terminal-tab-pane active" id="termPaneOutput">
-                            <pre class="terminal-screen" id="terminalOutput"><span class="term-dim">$ Terminal ready. Click "Run Code" or press Shift+Enter to execute.</span></pre>
+                        <div class="console-pane is-active" id="termPaneOutput">
+                            <pre class="console-screen" id="terminalOutput" aria-live="polite"><span class="t-dim">$ Ready. Press Run or Shift + Enter.</span></pre>
                         </div>
-
-                        <!-- Standard Input Tab Pane -->
-                        <div class="terminal-tab-pane" id="termPaneStdin">
-                            <textarea id="stdinInput" class="stdin-editor" placeholder="Provide test inputs here if your program reads from standard input (cin, input(), Scanner, etc.)..."></textarea>
+                        <div class="console-pane" id="termPaneStdin">
+                            <textarea id="stdinInput" class="stdin-box" aria-label="Standard input" placeholder="Values your program reads from stdin — one per line."></textarea>
                         </div>
                     </div>
-                </div>
+                </section>
 
-                <!-- Results Panel -->
-                <div class="panel results-panel">
-                    <div class="panel-header">
-                        <div class="panel-title">
-                            <span class="panel-icon">📊</span>
-                            Live Complexity & Metrics
+                <!-- ---------- RESULTS ---------- -->
+                <section class="card results-card" aria-label="Complexity results">
+                    <header class="card-head">
+                        <div class="card-title">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/></svg>
+                            <span>Complexity</span>
                         </div>
-                        <div class="panel-actions">
-                            <button class="icon-btn" id="copyResultBtn" title="Copy results" style="display:none;">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-                            </button>
-                        </div>
-                    </div>
+                        <button class="icon-btn" id="copyResultBtn" title="Copy results" hidden>
+                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        </button>
+                    </header>
+
                     <div class="results-body" id="resultsBody">
-                        <div class="empty-state">
-                            <div class="empty-icon">🔍</div>
-                            <h3>No Analysis Yet</h3>
-                            <p>Write your code on the left and click <strong>"Run Code"</strong> or <strong>"Analyze Big O"</strong>.</p>
-                            <div class="empty-features">
-                                <div class="feature-chip">⏱ Time Complexity</div>
-                                <div class="feature-chip">💾 Space Complexity</div>
-                                <div class="feature-chip">🚀 Runtime Benchmarks</div>
-                                <div class="feature-chip">💡 Optimization Tips</div>
+                        <div class="empty">
+                            <div class="empty-glyph" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/></svg>
+                            </div>
+                            <h2>No analysis yet</h2>
+                            <p>Write something on the left — the complexity appears here as you type.</p>
+                            <div class="empty-chips">
+                                <span>Time &amp; space</span><span>Benchmarks</span><span>Optimisation tips</span>
                             </div>
                         </div>
                     </div>
-                </div>
+                </section>
             </div>
 
-            <!-- History Section -->
-            <div class="history-section" id="historySection" style="display:none;">
-                <div class="section-header">
-                    <h2><span class="section-icon">🕐</span> Execution & Analysis History</h2>
-                    <button class="text-btn" id="clearHistoryBtn">Clear All</button>
+            <!-- ---------- HISTORY ---------- -->
+            <section class="history" id="historySection" hidden>
+                <div class="section-head">
+                    <h2>Recent runs</h2>
+                    <button class="link-btn" id="clearHistoryBtn">Clear all</button>
                 </div>
-                <div class="history-grid" id="historyGrid"></div>
-            </div>
+                <div class="history-list" id="historyGrid"></div>
+            </section>
         </section>
 
-        <!-- ====== EXAMPLES TAB ====== -->
-        <section class="tab-content" id="tab-examples">
-            <div class="section-header centered">
-                <h2>📚 Pre-loaded Algorithm Examples</h2>
-                <p>Click any algorithm to inspect its complexity and run it live</p>
+        <!-- ===================== EXAMPLES ===================== -->
+        <section class="tab-panel" id="tab-examples" role="tabpanel">
+            <div class="section-hero">
+                <h1>Algorithm examples</h1>
+                <p>Runnable starters with known complexity. Click one to load it into the editor.</p>
             </div>
             <div class="examples-grid" id="examplesGrid"></div>
         </section>
 
-        <!-- ====== LEARN TAB ====== -->
-        <section class="tab-content" id="tab-learn">
-            <div class="section-header centered">
-                <h2>🎓 Understanding Big O Notation</h2>
-                <p>A visual guide to algorithmic complexity</p>
+        <!-- ===================== LEARN ===================== -->
+        <section class="tab-panel" id="tab-learn" role="tabpanel">
+            <div class="section-hero">
+                <h1>Big O, visually</h1>
+                <p>How the common growth rates compare as input grows.</p>
             </div>
-            <div class="complexity-chart-container">
-                <canvas id="complexityChart"></canvas>
+
+            <div class="card chart-card">
+                <div class="chart-legend" id="chartLegend"></div>
+                <div class="chart-box">
+                    <canvas id="complexityChart" role="img" aria-label="Chart comparing growth rates of common Big O functions"></canvas>
+                </div>
             </div>
+
             <div class="learn-grid" id="learnGrid"></div>
         </section>
 
     </main>
 
-    <!-- Footer -->
     <footer class="footer">
-        <p>⚡ TC Analyzer Studio — Interactive Code Runner & Big-O Engine. Real-time client-side analysis + multi-language compilation.</p>
+        <span>TC Analyzer — browser playground &amp; Big O engine.</span>
+        <span class="footer-dot">·</span>
+        <span>JS &amp; Python run locally · compiled languages via remote sandbox.</span>
     </footer>
 
-    <!-- Toast Notification -->
-    <div class="toast" id="toast"></div>
+    <div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="false"></div>
 
-    <!-- Pyodide: In-Browser WebAssembly Python Runner -->
-    <script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
     <script src="analyzer.js"></script>
     <script src="runner.js"></script>
     <script src="app.js"></script>

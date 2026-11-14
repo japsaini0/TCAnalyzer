@@ -436,7 +436,9 @@ function executeNodeJS(code, stdin, startTime, res) {
     });
 }
 
-server.listen(PORT, '127.0.0.1', () => {
+const HOST = process.env.HOST || '127.0.0.1';
+
+server.listen(PORT, HOST, () => {
     console.log(`⚡ TC Analyzer Server running at http://localhost:${PORT}/`);
     console.log(`Local compilers detected: C++ (${GPP_PATH}), C (${GCC_PATH}), Python (${PYTHON_PATH})`);
 });
