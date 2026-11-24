@@ -1,0 +1,157 @@
+:root {
+  --space-3xs: 2px; --space-2xs: 4px; --space-xs: 8px; --space-sm: 12px; --space-md: 16px; --space-lg: 24px; --space-xl: 40px; --space-2xl: 64px; --space-3xl: 96px; --space-4xl: 144px;
+  --text-xs: 0.75rem; --text-sm: 0.875rem; --text-md: 1rem; --text-lg: 1.2rem; --text-xl: 1.44rem; --text-2xl: 1.728rem; --text-3xl: 2.074rem;
+  --text-display-s: 1.44rem; --text-display: 1.728rem; --text-section: 1.2rem; --text-title: 1rem; --text-lead: 1rem;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1); --ease-in: cubic-bezier(0.7, 0, 0.84, 0); --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-micro: 120ms; --dur-short: 220ms; --dur-long: 420ms;
+  --container: 1440px; --gutter: 24px; --gap-columns: 16px; --section-gap-s: 40px; --section-gap: 64px; --section-gap-l: 96px;
+  --z-base: 1; --z-raised: 10; --z-dropdown: 100; --z-sticky: 200; --z-sticky-nav: 300; --z-modal: 400; --z-toast: 500; --z-tooltip: 600;
+
+  --font-display: "Besley", Georgia, serif;
+  --font-body: "IBM Plex Sans", ui-sans-serif, sans-serif;
+  --font-outlier: "VT323", "JetBrains Mono", monospace;
+  --font-code: "JetBrains Mono", ui-monospace, monospace;
+
+  --radius-card: 2px;
+  --radius-pill: 2px;
+  --rule-hair: 1px;
+  --rule-bar: 2px;
+  --shadow-card: 2px 2px 0 oklch(16% 0.018 245 / 0.45);
+  --tracking-display: -0.02em;
+  --code-size: 13px;
+  --code-line: 21px;
+}
+
+html[data-theme="dark"], :root {
+  color-scheme: dark;
+  --color-desktop: oklch(49% 0.082 184);
+  --color-desktop-2: oklch(45% 0.080 184);
+  --color-desktop-ink: oklch(97% 0.008 90);
+  --color-desktop-shadow: oklch(15% 0.020 184);
+
+  --color-paper: oklch(86% 0.014 88);
+  --color-paper-2: oklch(93.5% 0.015 86);
+  --color-paper-3: oklch(79% 0.015 88);
+  --color-ink: oklch(18% 0.020 248);
+  --color-ink-2: oklch(30% 0.020 248);
+  --color-muted: oklch(40% 0.018 248);
+  --color-rule: oklch(68% 0.014 90);
+
+  --color-bevel-hi: oklch(97.5% 0.008 88);
+  --color-bevel-mid: oklch(58% 0.016 240);
+  --color-bevel-lo: oklch(18% 0.018 245);
+
+  --color-navy: oklch(28% 0.122 260);
+  --color-navy-2: oklch(37% 0.126 258);
+  --color-navy-ink: oklch(97% 0.008 90);
+
+  --color-crt: oklch(17.5% 0.018 246);
+  --color-crt-2: oklch(21.5% 0.018 246);
+  --color-crt-ink: oklch(93% 0.012 90);
+  --color-crt-muted: oklch(68% 0.018 240);
+  --color-crt-rule: oklch(31% 0.020 246);
+  --color-crt-amber: oklch(76% 0.172 68);
+  --color-crt-amber-dim: oklch(34% 0.032 68);
+  --color-crt-amber-soft: oklch(26% 0.045 64);
+
+  --color-accent: oklch(70% 0.180 62);
+  --color-accent-hover: oklch(75% 0.180 64);
+  --color-accent-ink: oklch(16% 0.022 50);
+  --color-accent-soft: oklch(90% 0.065 70);
+  --color-accent-border: oklch(48% 0.130 58);
+  --color-focus: oklch(76% 0.175 72);
+
+  --color-error: oklch(52% 0.19 27);
+  --color-error-soft: oklch(92% 0.045 27);
+  --color-success: oklch(43% 0.125 150);
+  --color-success-soft: oklch(92% 0.045 150);
+  --color-warn: oklch(50% 0.145 58);
+  --color-warn-soft: oklch(92% 0.055 72);
+
+  --color-term-ok: oklch(82% 0.165 148);
+  --color-term-err: oklch(74% 0.165 28);
+  --color-term-warn: oklch(80% 0.155 72);
+  --color-term-meta: oklch(78% 0.085 235);
+  --color-term-chip-ok-bg: oklch(28% 0.065 148);
+  --color-term-chip-err-bg: oklch(28% 0.065 28);
+  --color-term-chip-run-bg: oklch(29% 0.065 72);
+
+  --color-lcd-bg: oklch(17% 0.024 152);
+  --color-lcd-ink: oklch(83% 0.165 148);
+
+  --color-footer: oklch(85% 0.036 82);
+  --color-folder: oklch(84% 0.155 86);
+  --color-folder-edge: oklch(64% 0.140 72);
+  --color-chip-bg: oklch(20% 0.018 245);
+  --color-chip-ink: oklch(97% 0.008 90);
+  --color-row-hover: oklch(30% 0.118 260);
+  --color-row-hover-ink: oklch(97% 0.008 90);
+
+  --color-curve-1: oklch(80% 0.018 240);
+  --color-curve-log: oklch(88% 0.145 102);
+  --color-curve-n: oklch(78% 0.135 205);
+  --color-curve-nlogn: oklch(82% 0.165 132);
+  --color-curve-n2: oklch(76% 0.172 66);
+  --color-curve-exp: oklch(68% 0.215 352);
+  --color-curve-fact: oklch(68% 0.190 310);
+
+  --color-icon-screen: oklch(54% 0.088 184);
+  --color-icon-blue: oklch(52% 0.135 245);
+  --color-icon-teal: oklch(64% 0.110 205);
+  --color-icon-bin: oklch(72% 0.014 240);
+  --color-overlay-hi: oklch(98% 0.006 90 / 0.10);
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+  --color-desktop: oklch(63% 0.044 214);
+  --color-desktop-2: oklch(59% 0.044 214);
+  --color-desktop-ink: oklch(97% 0.008 90);
+  --color-desktop-shadow: oklch(22% 0.024 220);
+
+  --color-paper: oklch(90% 0.010 88);
+  --color-paper-2: oklch(96.5% 0.009 86);
+  --color-paper-3: oklch(84% 0.012 88);
+  --color-ink: oklch(18% 0.020 248);
+  --color-ink-2: oklch(30% 0.020 248);
+  --color-muted: oklch(40% 0.018 248);
+  --color-rule: oklch(76% 0.012 90);
+
+  --color-bevel-hi: oklch(98.5% 0.006 88);
+  --color-bevel-mid: oklch(64% 0.014 240);
+  --color-bevel-lo: oklch(22% 0.018 245);
+
+  --color-navy: oklch(31% 0.112 258);
+  --color-navy-2: oklch(40% 0.118 255);
+  --color-navy-ink: oklch(97% 0.008 90);
+
+  --color-crt: oklch(96.5% 0.009 86);
+  --color-crt-2: oklch(91.5% 0.010 88);
+  --color-crt-ink: oklch(18% 0.020 248);
+  --color-crt-muted: oklch(41% 0.018 248);
+  --color-crt-rule: oklch(80% 0.012 90);
+  --color-crt-amber: oklch(48% 0.165 54);
+  --color-crt-amber-dim: oklch(84% 0.020 80);
+  --color-crt-amber-soft: oklch(92% 0.055 72);
+
+  --color-accent: oklch(70% 0.180 62);
+  --color-accent-hover: oklch(75% 0.180 64);
+  --color-accent-ink: oklch(16% 0.022 50);
+  --color-accent-soft: oklch(92% 0.055 72);
+  --color-accent-border: oklch(48% 0.130 58);
+  --color-focus: oklch(42% 0.165 256);
+
+  --color-term-ok: oklch(38% 0.125 150);
+  --color-term-err: oklch(46% 0.180 26);
+  --color-term-warn: oklch(46% 0.145 58);
+  --color-term-meta: oklch(38% 0.095 245);
+  --color-term-chip-ok-bg: oklch(91% 0.045 150);
+  --color-term-chip-err-bg: oklch(91% 0.045 26);
+  --color-term-chip-run-bg: oklch(91% 0.055 72);
+
+  --color-lcd-bg: oklch(20% 0.024 152);
+  --color-lcd-ink: oklch(83% 0.165 148);
+
+  --color-footer: oklch(88% 0.026 84);
+  --color-overlay-hi: oklch(20% 0.018 245 / 0.08);
+}

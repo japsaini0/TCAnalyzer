@@ -1,0 +1,14 @@
+[
+ {
+  "mode": "redesign",
+  "depth": "full",
+  "scope": "app",
+  "theme": "custom",
+  "axes": "mid/roman-serif/chromatic-amber",
+  "prompt": "Retro 1995 desktop OS UI for TC Analyzer using Stitch and Hallmark",
+  "waived": [
+   "37"
+  ],
+  "date": "2026-11-24"
+ }
+]

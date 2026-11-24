@@ -3,254 +3,531 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TC Analyzer — Code Playground &amp; Big O Complexity Engine</title>
+    <title>TC Analyzer: Code Playground &amp; Big O Complexity Engine</title>
 
     <meta name="description" content="Write, run and analyse code in 7 languages while getting live Big O time and space complexity, runtime benchmarks and optimisation tips. Runs in your browser.">
-    <meta name="theme-color" content="#15181e">
+    <meta name="theme-color" content="#1e7874">
     <link rel="canonical" href="https://www.tcanalyzer.tech/">
 
-    <!-- Open Graph / social -->
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://www.tcanalyzer.tech/">
-    <meta property="og:title" content="TC Analyzer — Code Playground &amp; Big O Complexity Engine">
+    <meta property="og:title" content="TC Analyzer: Code Playground &amp; Big O Complexity Engine">
     <meta property="og:description" content="Run code in 7 languages while inspecting live Big O time and space complexity side by side.">
     <meta property="og:site_name" content="TC Analyzer">
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="TC Analyzer — Code Playground &amp; Big O Complexity Engine">
+    <meta name="twitter:title" content="TC Analyzer: Code Playground &amp; Big O Complexity Engine">
     <meta name="twitter:description" content="Run code in 7 languages while inspecting live Big O time and space complexity side by side.">
 
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230f9d8f'/><path d='M55 14 28 56h18l-6 30 32-44H52z' fill='white'/></svg>">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%23122b6d'/><rect x='3' y='3' width='10' height='10' fill='%23e88618'/><rect x='5' y='5' width='6' height='6' fill='%23121720'/></svg>">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Besley:wght@700&family=IBM+Plex+Sans:wght@400;500;700&family=JetBrains+Mono:wght@400;500;700&family=VT323&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
-    <!-- ===================== TOP BAR ===================== -->
+    <!-- ===================== TOP OS TASKBAR ===================== -->
     <header class="topbar">
         <a class="brand" href="./" aria-label="TC Analyzer home">
             <span class="brand-mark" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M13.5 2 4 14h6l-1 8 9.5-12h-6z"/></svg>
+                <svg viewBox="0 0 16 16" width="16" height="16" shape-rendering="crispEdges">
+                    <rect x="3" y="3" width="10" height="10" fill="currentColor"/>
+                    <rect x="5" y="5" width="6" height="6" fill="#122b6d"/>
+                    <rect x="1" y="5" width="2" height="2" fill="currentColor"/>
+                    <rect x="1" y="9" width="2" height="2" fill="currentColor"/>
+                    <rect x="13" y="5" width="2" height="2" fill="currentColor"/>
+                    <rect x="13" y="9" width="2" height="2" fill="currentColor"/>
+                </svg>
             </span>
-            <span class="brand-name">TC<span>Analyzer</span></span>
-            <span class="brand-tag">Compiler</span>
+            <span class="brand-name">TC <span>Analyzer</span></span>
         </a>
 
         <nav class="tabs" role="tablist" aria-label="Sections">
-            <button class="tab-btn is-active" data-tab="analyzer" role="tab" aria-selected="true">Playground</button>
-            <button class="tab-btn" data-tab="examples" role="tab" aria-selected="false">Examples</button>
-            <button class="tab-btn" data-tab="learn" role="tab" aria-selected="false">Big&nbsp;O Guide</button>
+            <button type="button" class="tab-btn is-active" data-tab="analyzer" role="tab" aria-selected="true">Playground</button>
+            <button type="button" class="tab-btn" data-tab="examples" role="tab" aria-selected="false">Examples</button>
+            <button type="button" class="tab-btn" data-tab="learn" role="tab" aria-selected="false">Big&nbsp;O Guide</button>
         </nav>
 
         <div class="topbar-actions">
             <span class="run-counter" title="Executions this browser"><span id="queryCount">0</span>&nbsp;runs</span>
-            <button class="icon-btn theme-btn" id="themeToggle" aria-label="Switch to dark theme" aria-pressed="false">
-                <svg class="icon-moon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
-                <svg class="icon-sun" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/></svg>
+            <button type="button" class="icon-btn theme-btn" id="themeToggle" aria-label="Switch to light theme" aria-pressed="true">
+                <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+                <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg>
             </button>
+            <span class="os-glyphs" aria-hidden="true">
+                <span class="os-glyph">_</span>
+                <span class="os-glyph">□</span>
+                <span class="os-glyph">×</span>
+            </span>
         </div>
     </header>
 
-    <main class="page">
+    <!-- ===================== RETRO DESKTOP SHELL ===================== -->
+    <div class="desktop-shell">
 
-        <!-- ===================== PLAYGROUND ===================== -->
-        <section class="tab-panel is-active" id="tab-analyzer" role="tabpanel">
+        <!-- ---------- LEFT DESKTOP ICON RAIL ---------- -->
+        <aside class="desktop-rail" aria-label="Desktop shortcuts">
+            <button type="button" class="desk-icon" data-desk-action="playground">
+                <span class="desk-icon-box" aria-hidden="true">
+                    <svg viewBox="0 0 32 32" width="36" height="36" shape-rendering="crispEdges">
+                        <rect x="4" y="3" width="24" height="18" fill="#dad8ce" stroke="#181c24" stroke-width="2"/>
+                        <rect x="7" y="6" width="18" height="12" fill="#2c7a7b"/>
+                        <rect x="9" y="8" width="6" height="2" fill="#9de8e0"/>
+                        <rect x="11" y="21" width="10" height="3" fill="#8f949e" stroke="#181c24" stroke-width="1"/>
+                        <rect x="6" y="24" width="20" height="4" fill="#dad8ce" stroke="#181c24" stroke-width="2"/>
+                    </svg>
+                </span>
+                <span class="desk-icon-label">My Computer</span>
+            </button>
 
-            <div class="hero">
-                <p class="eyebrow">Compiler edition</p>
-                <h1>Run it. Then understand <em>why</em> it's slow.</h1>
-                <p class="hero-sub">
-                    Execute code in 7 languages and get the Big O time &amp; space complexity beside it —
-                    live, as you type.
-                </p>
-            </div>
+            <button type="button" class="desk-icon" data-desk-action="projects">
+                <span class="desk-icon-box" aria-hidden="true">
+                    <svg viewBox="0 0 32 32" width="36" height="36" shape-rendering="crispEdges">
+                        <path d="M3 8h10l3 3h13v15H3z" fill="#e8ba36" stroke="#181c24" stroke-width="2"/>
+                        <rect x="5" y="13" width="22" height="11" fill="#f2cf5b"/>
+                    </svg>
+                </span>
+                <span class="desk-icon-label">Projects</span>
+            </button>
 
-            <div class="workspace">
+            <button type="button" class="desk-icon" data-desk-action="docs">
+                <span class="desk-icon-box" aria-hidden="true">
+                    <svg viewBox="0 0 32 32" width="36" height="36" shape-rendering="crispEdges">
+                        <rect x="6" y="4" width="20" height="24" fill="#f3efe4" stroke="#181c24" stroke-width="2"/>
+                        <rect x="9" y="2" width="3" height="4" fill="#181c24"/>
+                        <rect x="15" y="2" width="3" height="4" fill="#181c24"/>
+                        <rect x="21" y="2" width="3" height="4" fill="#181c24"/>
+                        <path d="M10 11h12M10 15h12M10 19h12M10 23h8" stroke="#2c3e66" stroke-width="2"/>
+                    </svg>
+                </span>
+                <span class="desk-icon-label">Docs</span>
+            </button>
 
-                <!-- ---------- EDITOR ---------- -->
-                <section class="card editor-card" aria-label="Code editor">
-                    <header class="card-head">
-                        <div class="card-title">
-                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="8 6 3 12 8 18"/><polyline points="16 6 21 12 16 18"/></svg>
-                            <span>Code</span>
+            <button type="button" class="desk-icon" data-desk-action="examples">
+                <span class="desk-icon-box" aria-hidden="true">
+                    <svg viewBox="0 0 32 32" width="36" height="36" shape-rendering="crispEdges">
+                        <circle cx="16" cy="16" r="12" fill="#2d74b8" stroke="#181c24" stroke-width="2"/>
+                        <path d="M11 10h6v5h-4v4h-3z" fill="#52b86a"/>
+                        <path d="M19 14h5v7h-4v3h-3v-5z" fill="#52b86a"/>
+                        <path d="M4 16h24" stroke="#9bc8f0" stroke-width="1"/>
+                    </svg>
+                </span>
+                <span class="desk-icon-label">Internet</span>
+            </button>
+
+            <button type="button" class="desk-icon" data-desk-action="clear">
+                <span class="desk-icon-box" aria-hidden="true">
+                    <svg viewBox="0 0 32 32" width="36" height="36" shape-rendering="crispEdges">
+                        <path d="M8 9h16l-2 18H10z" fill="#c7cad1" stroke="#181c24" stroke-width="2"/>
+                        <rect x="6" y="7" width="20" height="3" fill="#dad8ce" stroke="#181c24" stroke-width="2"/>
+                        <path d="M12 13l1 10M16 13v10M20 13l-1 10" stroke="#4a505c" stroke-width="2"/>
+                    </svg>
+                </span>
+                <span class="desk-icon-label">Recycle Bin</span>
+            </button>
+        </aside>
+
+        <main class="page">
+
+            <!-- ===================== PLAYGROUND ===================== -->
+            <section class="tab-panel is-active" id="tab-analyzer" role="tabpanel">
+
+                <!-- ---------- HERO PANE ---------- -->
+                <div class="os-pane hero-pane">
+                    <div class="os-head">
+                        <div class="os-head-left">
+                            <svg class="os-head-icon" viewBox="0 0 16 16" aria-hidden="true" shape-rendering="crispEdges">
+                                <rect x="2" y="2" width="12" height="12" fill="#e8ba36"/>
+                                <rect x="4" y="4" width="8" height="8" fill="#181c24"/>
+                                <rect x="6" y="6" width="4" height="4" fill="#e88618"/>
+                            </svg>
+                            <span class="os-caption">TC Analyzer</span>
                         </div>
-                        <div class="card-tools">
-                            <label class="select-wrap">
-                                <span class="sr-only">Programming language</span>
-                                <select id="languageSelect">
-                                    <option value="auto">Auto detect</option>
-                                    <option value="python">Python 3.12</option>
-                                    <option value="javascript">JavaScript (Browser)</option>
-                                    <option value="cpp">C++ (GCC 13)</option>
-                                    <option value="c">C (GCC 13)</option>
-                                    <option value="java">Java (JDK 22)</option>
-                                    <option value="go">Go 1.23</option>
-                                    <option value="rust">Rust 1.82</option>
-                                    <option value="pseudo">Pseudocode</option>
-                                </select>
-                                <svg class="select-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
-                            </label>
-
-                            <button class="icon-btn" id="templateBtn" title="Load a runnable starter template">
-                                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/></svg>
-                            </button>
-                            <button class="icon-btn" id="clearBtn" title="Clear editor">
-                                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/><path d="M10 11v5M14 11v5"/></svg>
-                            </button>
-                            <button class="icon-btn" id="copyBtn" title="Copy code">
-                                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                            </button>
-                        </div>
-                    </header>
-
-                    <div class="editor-shell">
-                        <pre class="gutter" id="lineNumbers" aria-hidden="true">1</pre>
-                        <textarea
-                            id="codeInput"
-                            class="code-editor"
-                            aria-label="Code editor"
-                            spellcheck="false"
-                            autocapitalize="off"
-                            autocorrect="off"
-                            autocomplete="off"
-                            placeholder="// Paste code here, or press the template icon above.
-// Shift + Enter  → run
-// Ctrl  + Enter  → analyse complexity"></textarea>
-                    </div>
-
-                    <div class="editor-meta">
-                        <span class="meta-text"><span id="charCount">0</span> chars · <span id="lineCount">0</span> <span id="lineWord">lines</span></span>
-                        <label class="switch" title="Re-analyse complexity as you type">
-                            <input type="checkbox" id="liveToggle" checked>
-                            <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-                            <span class="switch-label">Live Big O</span>
-                        </label>
-                    </div>
-
-                    <div class="action-bar">
-                        <button class="btn btn-primary" id="runBtn" title="Run code (Shift + Enter)">
-                            <span class="btn-content">
-                                <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l13-7.5z"/></svg>
-                                Run
+                        <div class="os-head-right">
+                            <span class="os-glyphs" aria-hidden="true">
+                                <span class="os-glyph">_</span>
+                                <span class="os-glyph">□</span>
+                                <span class="os-glyph">×</span>
                             </span>
-                            <span class="btn-loading"><span class="spinner"></span>Running</span>
-                        </button>
-                        <button class="btn btn-secondary" id="runAnalyzeBtn" title="Run and analyse (Ctrl + Shift + Enter)">
-                            <span class="btn-content">
-                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 4 14h6l-1 8 10-12h-6z"/></svg>
-                                Run &amp; analyse
-                            </span>
-                            <span class="btn-loading"><span class="spinner"></span>Running</span>
-                        </button>
-                        <button class="btn btn-ghost" id="analyzeBtn" title="Analyse complexity only (Ctrl + Enter)">
-                            <span class="btn-content">
-                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l5-5 4 3 6-7"/><path d="M15 8h3v3"/></svg>
-                                Analyse
-                            </span>
-                            <span class="btn-loading"><span class="spinner"></span>Analysing</span>
-                        </button>
-                    </div>
-
-                    <!-- ---------- CONSOLE ---------- -->
-                    <div class="console">
-                        <div class="console-head">
-                            <div class="console-tabs" role="tablist" aria-label="Console tabs">
-                                <button class="console-tab is-active" data-term-tab="output" role="tab" aria-selected="true">
-                                    <span class="status-dot is-idle" id="termStatusDot"></span>Output
-                                </button>
-                                <button class="console-tab" data-term-tab="stdin" role="tab" aria-selected="false">Stdin</button>
-                            </div>
-                            <div class="console-tools">
-                                <span class="console-chip" id="termMetaChip" hidden></span>
-                                <button class="icon-btn icon-btn-dark" id="copyTermBtn" title="Copy output">
-                                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                                </button>
-                                <button class="icon-btn icon-btn-dark" id="clearTermBtn" title="Clear output">
-                                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
-                                </button>
-                            </div>
-                        </div>
-
-                        <div class="console-pane is-active" id="termPaneOutput">
-                            <pre class="console-screen" id="terminalOutput" aria-live="polite"><span class="t-dim">$ Ready. Press Run or Shift + Enter.</span></pre>
-                        </div>
-                        <div class="console-pane" id="termPaneStdin">
-                            <textarea id="stdinInput" class="stdin-box" aria-label="Standard input" placeholder="Values your program reads from stdin — one per line."></textarea>
                         </div>
                     </div>
-                </section>
 
-                <!-- ---------- RESULTS ---------- -->
-                <section class="card results-card" aria-label="Complexity results">
-                    <header class="card-head">
-                        <div class="card-title">
-                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/></svg>
-                            <span>Complexity</span>
-                        </div>
-                        <button class="icon-btn" id="copyResultBtn" title="Copy results" hidden>
-                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                        </button>
-                    </header>
-
-                    <div class="results-body" id="resultsBody">
-                        <div class="empty">
-                            <div class="empty-glyph" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/></svg>
-                            </div>
-                            <h2>No analysis yet</h2>
-                            <p>Write something on the left — the complexity appears here as you type.</p>
-                            <div class="empty-chips">
-                                <span>Time &amp; space</span><span>Benchmarks</span><span>Optimisation tips</span>
-                            </div>
+                    <div class="hero-inner">
+                        <svg class="hero-chip" viewBox="0 0 48 48" aria-hidden="true" shape-rendering="crispEdges">
+                            <rect x="10" y="10" width="28" height="28" fill="#181c24" stroke="#181c24" stroke-width="2"/>
+                            <rect x="13" y="13" width="22" height="22" fill="#232833" stroke="#e88618" stroke-width="2"/>
+                            <rect x="4" y="15" width="6" height="3" fill="#181c24"/>
+                            <rect x="4" y="22" width="6" height="3" fill="#181c24"/>
+                            <rect x="4" y="29" width="6" height="3" fill="#181c24"/>
+                            <rect x="38" y="15" width="6" height="3" fill="#181c24"/>
+                            <rect x="38" y="22" width="6" height="3" fill="#181c24"/>
+                            <rect x="38" y="29" width="6" height="3" fill="#181c24"/>
+                            <rect x="15" y="4" width="3" height="6" fill="#181c24"/>
+                            <rect x="22" y="4" width="3" height="6" fill="#181c24"/>
+                            <rect x="29" y="4" width="3" height="6" fill="#181c24"/>
+                            <rect x="15" y="38" width="3" height="6" fill="#181c24"/>
+                            <rect x="22" y="38" width="3" height="6" fill="#181c24"/>
+                            <rect x="29" y="38" width="3" height="6" fill="#181c24"/>
+                            <path d="M16 19h7v3h-2v8h-3v-8h-2zM25 19h7v3h-4v5h4v3h-7z" fill="#e88618"/>
+                        </svg>
+                        <div class="hero-copy">
+                            <h1>Run it. Then understand why it’s slow.</h1>
+                            <p class="hero-sub">Write code. Get live Big O, benchmarks and optimisation tips.</p>
                         </div>
                     </div>
-                </section>
-            </div>
-
-            <!-- ---------- HISTORY ---------- -->
-            <section class="history" id="historySection" hidden>
-                <div class="section-head">
-                    <h2>Recent runs</h2>
-                    <button class="link-btn" id="clearHistoryBtn">Clear all</button>
                 </div>
-                <div class="history-list" id="historyGrid"></div>
+
+                <!-- ---------- MAIN 2-COLUMN WORKSPACE ---------- -->
+                <div class="workspace">
+
+                    <!-- ---------- CODE.EXE ---------- -->
+                    <section class="card editor-card" aria-label="Code editor">
+                        <div class="os-head">
+                            <div class="os-head-left">
+                                <svg class="os-head-icon" viewBox="0 0 16 16" aria-hidden="true" shape-rendering="crispEdges">
+                                    <path d="M2 3h5l2 2h5v8H2z" fill="#e8ba36"/>
+                                </svg>
+                                <h2 class="os-caption">CODE.EXE</h2>
+                            </div>
+                            <div class="os-head-right">
+                                <span class="os-glyphs" aria-hidden="true">
+                                    <span class="os-glyph">_</span>
+                                    <span class="os-glyph">□</span>
+                                    <span class="os-glyph">×</span>
+                                </span>
+                            </div>
+                        </div>
+
+                        <header class="card-head">
+                            <div class="card-tools">
+                                <label class="lang-label" for="languageSelect">Language:</label>
+                                <span class="select-wrap">
+                                    <select id="languageSelect">
+                                        <option value="auto">Auto detect</option>
+                                        <option value="python">Python 3.12</option>
+                                        <option value="javascript">JavaScript (Browser)</option>
+                                        <option value="cpp">C++ (GCC 13)</option>
+                                        <option value="c">C (GCC 13)</option>
+                                        <option value="java">Java (JDK 22)</option>
+                                        <option value="go">Go 1.23</option>
+                                        <option value="rust">Rust 1.82</option>
+                                        <option value="pseudo">Pseudocode</option>
+                                    </select>
+                                    <svg class="select-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+                                </span>
+
+                                <button type="button" class="icon-btn" id="templateBtn" title="Load a runnable starter template" aria-label="Load starter template">
+                                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M14 3H7v18h10V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/></svg>
+                                </button>
+                                <button type="button" class="icon-btn" id="clearBtn" title="Clear editor" aria-label="Clear editor">
+                                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M4 6h16M9 6V4h6v2M18 6l-1 14H7L6 6"/></svg>
+                                </button>
+                                <button type="button" class="icon-btn" id="copyBtn" title="Copy code" aria-label="Copy code">
+                                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><rect x="9" y="9" width="11" height="11"/><path d="M5 15H4V4h11v1"/></svg>
+                                </button>
+                            </div>
+
+                            <div class="action-bar">
+                                <button type="button" class="btn btn-secondary" id="runBtn" title="Run code (Shift + Enter)">
+                                    <span class="btn-content">Run</span>
+                                    <span class="btn-loading"><span class="spinner"></span>Running</span>
+                                </button>
+                                <button type="button" class="btn btn-primary" id="runAnalyzeBtn" title="Run and analyse (Ctrl + Shift + Enter)">
+                                    <span class="btn-content">Run &amp; analyse</span>
+                                    <span class="btn-loading"><span class="spinner"></span>Running</span>
+                                </button>
+                                <button type="button" class="btn btn-ghost" id="analyzeBtn" title="Analyse complexity only (Ctrl + Enter)">
+                                    <span class="btn-content">Analyse</span>
+                                    <span class="btn-loading"><span class="spinner"></span>Analysing</span>
+                                </button>
+                            </div>
+                        </header>
+
+                        <div class="editor-box">
+                            <div class="editor-shell">
+                                <pre class="gutter" id="lineNumbers" aria-hidden="true">1</pre>
+                                <textarea
+                                    id="codeInput"
+                                    class="code-editor"
+                                    aria-label="Code editor"
+                                    spellcheck="false"
+                                    autocapitalize="off"
+                                    autocorrect="off"
+                                    autocomplete="off"
+                                    placeholder="// Paste code here, or press the template icon above.
+// Shift + Enter  : run
+// Ctrl  + Enter  : analyse complexity"></textarea>
+                            </div>
+
+                            <div class="editor-status">
+                                <span class="status-text"><span id="charCount">0</span> chars · <span id="lineCount">0</span> <span id="lineWord">lines</span></span>
+                                <label class="switch" title="Re-analyse complexity as you type">
+                                    <input type="checkbox" id="liveToggle" checked>
+                                    <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+                                    <span class="switch-label">Live Big O</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- ---------- OUTPUT SUB-PANE ---------- -->
+                        <div class="console">
+                            <div class="os-head os-head--sub">
+                                <div class="os-head-left">
+                                    <h3 class="os-caption">OUTPUT</h3>
+                                </div>
+                                <div class="os-head-right">
+                                    <span class="os-glyphs" aria-hidden="true">
+                                        <span class="os-glyph">_</span>
+                                        <span class="os-glyph">□</span>
+                                        <span class="os-glyph">×</span>
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div class="console-head">
+                                <div class="console-tabs" role="tablist" aria-label="Console tabs">
+                                    <button type="button" class="console-tab is-active" data-term-tab="output" role="tab" aria-selected="true">
+                                        <span class="status-dot is-idle" id="termStatusDot"></span>Output
+                                    </button>
+                                    <button type="button" class="console-tab" data-term-tab="stdin" role="tab" aria-selected="false">Stdin</button>
+                                </div>
+                                <div class="console-tools">
+                                    <span class="console-chip" id="termMetaChip" hidden></span>
+                                    <button type="button" class="icon-btn icon-btn-dark" id="copyTermBtn" title="Copy output" aria-label="Copy output">
+                                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><rect x="9" y="9" width="11" height="11"/><path d="M5 15H4V4h11v1"/></svg>
+                                    </button>
+                                    <button type="button" class="icon-btn icon-btn-dark" id="clearTermBtn" title="Clear output" aria-label="Clear output">
+                                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="console-pane is-active" id="termPaneOutput">
+                                <pre class="console-screen" id="terminalOutput" aria-live="polite"><span class="t-dim">C:\&gt; Ready. Press Run or Shift + Enter.</span></pre>
+                            </div>
+                            <div class="console-pane" id="termPaneStdin">
+                                <textarea id="stdinInput" class="stdin-box" aria-label="Standard input" placeholder="Values your program reads from stdin, one per line."></textarea>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- ---------- COMPLEXITY.EXE ---------- -->
+                    <section class="card results-card" aria-label="Complexity results">
+                        <div class="os-head">
+                            <div class="os-head-left">
+                                <svg class="os-head-icon" viewBox="0 0 16 16" aria-hidden="true" shape-rendering="crispEdges">
+                                    <rect x="2" y="2" width="12" height="12" fill="#e8ba36"/>
+                                    <rect x="4" y="9" width="2" height="4" fill="#181c24"/>
+                                    <rect x="7" y="6" width="2" height="7" fill="#181c24"/>
+                                    <rect x="10" y="4" width="2" height="9" fill="#181c24"/>
+                                </svg>
+                                <h2 class="os-caption">COMPLEXITY.EXE</h2>
+                            </div>
+                            <div class="os-head-right">
+                                <button type="button" class="os-head-link" id="copyResultBtn" title="Copy results" hidden>Copy</button>
+                                <span class="os-glyphs" aria-hidden="true">
+                                    <span class="os-glyph">_</span>
+                                    <span class="os-glyph">□</span>
+                                    <span class="os-glyph">×</span>
+                                </span>
+                            </div>
+                        </div>
+
+                        <div class="results-body" id="resultsBody">
+                            <div class="result-hero">
+                                <div class="result-hero-label">Time complexity</div>
+                                <div class="result-hero-value">O(?)</div>
+                                <div class="result-space-line">Space Complexity: <strong>pending</strong></div>
+                                <div class="complexity-meter" aria-hidden="true">
+                                    <span class="meter-seg"></span><span class="meter-seg"></span><span class="meter-seg"></span><span class="meter-seg"></span><span class="meter-seg"></span>
+                                    <span class="meter-seg"></span><span class="meter-seg"></span><span class="meter-seg"></span><span class="meter-seg"></span><span class="meter-seg"></span>
+                                    <span class="meter-seg"></span><span class="meter-seg"></span><span class="meter-seg"></span><span class="meter-seg"></span><span class="meter-seg"></span>
+                                </div>
+                            </div>
+
+                            <div class="folder-tabs" aria-label="Complexity sections">
+                                <button type="button" class="folder-tab is-active" data-result-focus="stats">
+                                    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" shape-rendering="crispEdges"><path d="M1 3h5l2 2h7v8H1z" fill="#e8ba36" stroke="#181c24" stroke-width="1"/></svg>
+                                    <span>Time &amp; Space</span>
+                                </button>
+                                <button type="button" class="folder-tab" data-result-focus="bench">
+                                    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" shape-rendering="crispEdges"><path d="M1 3h5l2 2h7v8H1z" fill="#e8ba36" stroke="#181c24" stroke-width="1"/></svg>
+                                    <span>Benchmarks</span>
+                                </button>
+                                <button type="button" class="folder-tab" data-result-focus="tips">
+                                    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" shape-rendering="crispEdges"><path d="M1 3h5l2 2h7v8H1z" fill="#e8ba36" stroke="#181c24" stroke-width="1"/></svg>
+                                    <span>Optimisation Tips</span>
+                                </button>
+                            </div>
+
+                            <div class="empty-hint">
+                                Write code in CODE.EXE or pick an algorithm below to inspect live Big O time and space complexity.
+                            </div>
+                        </div>
+                    </section>
+                </div>
+
+                <!-- ---------- BOTTOM 2-COLUMN DESKTOP PANELS ---------- -->
+                <div class="desktop-bottom-grid">
+
+                    <!-- ---------- EXAMPLES TABLE PANE ---------- -->
+                    <section class="os-pane" aria-label="Algorithm examples table">
+                        <div class="os-head">
+                            <div class="os-head-left">
+                                <svg class="os-head-icon" viewBox="0 0 16 16" aria-hidden="true" shape-rendering="crispEdges">
+                                    <rect x="2" y="2" width="12" height="12" fill="#e8ba36"/>
+                                    <rect x="4" y="4" width="8" height="2" fill="#181c24"/>
+                                    <rect x="4" y="7" width="8" height="2" fill="#181c24"/>
+                                    <rect x="4" y="10" width="8" height="2" fill="#181c24"/>
+                                </svg>
+                                <h2 class="os-caption">EXAMPLES</h2>
+                            </div>
+                            <div class="os-head-right">
+                                <button type="button" class="os-head-link" id="openExamplesBtn">All examples</button>
+                                <span class="os-glyphs" aria-hidden="true">
+                                    <span class="os-glyph">_</span>
+                                    <span class="os-glyph">□</span>
+                                    <span class="os-glyph">×</span>
+                                </span>
+                            </div>
+                        </div>
+
+                        <div class="os-table-wrap">
+                            <table class="os-table">
+                                <thead>
+                                    <tr>
+                                        <th>Algorithm</th>
+                                        <th>Language</th>
+                                        <th>Complexity</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="examplesPreviewBody"></tbody>
+                            </table>
+                        </div>
+                    </section>
+
+                    <!-- ---------- BIG-O.GRAPH PANE ---------- -->
+                    <section class="os-pane" aria-label="Big O growth rate graph">
+                        <div class="os-head">
+                            <div class="os-head-left">
+                                <svg class="os-head-icon" viewBox="0 0 16 16" aria-hidden="true" shape-rendering="crispEdges">
+                                    <rect x="2" y="2" width="12" height="12" fill="#181c24" stroke="#f3efe4" stroke-width="1"/>
+                                    <path d="M3 12l3-2 3-3 4-4" stroke="#e88618" stroke-width="2" fill="none"/>
+                                </svg>
+                                <h2 class="os-caption">BIG-O.GRAPH</h2>
+                            </div>
+                            <div class="os-head-right">
+                                <button type="button" class="os-head-link" id="openGuideBtn">Full guide</button>
+                                <span class="os-glyphs" aria-hidden="true">
+                                    <span class="os-glyph">_</span>
+                                    <span class="os-glyph">□</span>
+                                    <span class="os-glyph">×</span>
+                                </span>
+                            </div>
+                        </div>
+
+                        <div class="crt-graph-well">
+                            <div class="crt-graph-canvas-wrap">
+                                <canvas id="playgroundChart" role="img" aria-label="Comparison chart of Big O growth curves"></canvas>
+                            </div>
+                            <div class="crt-graph-legend" id="playgroundLegend"></div>
+                        </div>
+                    </section>
+                </div>
+
+                <!-- ---------- RECENT RUNS HISTORY ---------- -->
+                <section class="os-pane history" id="historySection" hidden>
+                    <div class="os-head">
+                        <div class="os-head-left">
+                            <h2 class="os-caption">RECENT RUNS</h2>
+                        </div>
+                        <div class="os-head-right">
+                            <button type="button" class="os-head-link" id="clearHistoryBtn">Clear all</button>
+                            <span class="os-glyphs" aria-hidden="true">
+                                <span class="os-glyph">_</span>
+                                <span class="os-glyph">□</span>
+                                <span class="os-glyph">×</span>
+                            </span>
+                        </div>
+                    </div>
+                    <div class="history-body">
+                        <div class="history-list" id="historyGrid"></div>
+                    </div>
+                </section>
             </section>
-        </section>
 
-        <!-- ===================== EXAMPLES ===================== -->
-        <section class="tab-panel" id="tab-examples" role="tabpanel">
-            <div class="section-hero">
-                <h1>Algorithm examples</h1>
-                <p>Runnable starters with known complexity. Click one to load it into the editor.</p>
-            </div>
-            <div class="examples-grid" id="examplesGrid"></div>
-        </section>
-
-        <!-- ===================== LEARN ===================== -->
-        <section class="tab-panel" id="tab-learn" role="tabpanel">
-            <div class="section-hero">
-                <h1>Big O, visually</h1>
-                <p>How the common growth rates compare as input grows.</p>
-            </div>
-
-            <div class="card chart-card">
-                <div class="chart-legend" id="chartLegend"></div>
-                <div class="chart-box">
-                    <canvas id="complexityChart" role="img" aria-label="Chart comparing growth rates of common Big O functions"></canvas>
+            <!-- ===================== EXAMPLES TAB ===================== -->
+            <section class="tab-panel" id="tab-examples" role="tabpanel">
+                <div class="os-pane">
+                    <div class="os-head">
+                        <div class="os-head-left">
+                            <h2 class="os-caption">EXAMPLES.EXE</h2>
+                        </div>
+                        <div class="os-head-right">
+                            <span class="os-glyphs" aria-hidden="true">
+                                <span class="os-glyph">_</span>
+                                <span class="os-glyph">□</span>
+                                <span class="os-glyph">×</span>
+                            </span>
+                        </div>
+                    </div>
+                    <div class="section-hero-body">
+                        <h1>Algorithm examples</h1>
+                        <p>Runnable starters with known complexity. Click one to load it into CODE.EXE.</p>
+                    </div>
                 </div>
-            </div>
+                <div class="examples-grid" id="examplesGrid"></div>
+            </section>
 
-            <div class="learn-grid" id="learnGrid"></div>
-        </section>
+            <!-- ===================== BIG O GUIDE TAB ===================== -->
+            <section class="tab-panel" id="tab-learn" role="tabpanel">
+                <div class="os-pane">
+                    <div class="os-head">
+                        <div class="os-head-left">
+                            <h2 class="os-caption">BIG-O GUIDE</h2>
+                        </div>
+                        <div class="os-head-right">
+                            <span class="os-glyphs" aria-hidden="true">
+                                <span class="os-glyph">_</span>
+                                <span class="os-glyph">□</span>
+                                <span class="os-glyph">×</span>
+                            </span>
+                        </div>
+                    </div>
+                    <div class="section-hero-body">
+                        <h1>Big O, visually</h1>
+                        <p>How the common growth rates compare as input grows.</p>
+                    </div>
+                </div>
 
-    </main>
+                <div class="card chart-card">
+                    <div class="os-head">
+                        <div class="os-head-left">
+                            <h2 class="os-caption">BIG-O.GRAPH</h2>
+                        </div>
+                    </div>
+                    <div class="chart-body">
+                        <div class="chart-legend" id="chartLegend"></div>
+                        <div class="chart-box">
+                            <canvas id="complexityChart" role="img" aria-label="Chart comparing growth rates of common Big O functions"></canvas>
+                        </div>
+                    </div>
+                </div>
 
+                <div class="learn-grid" id="learnGrid"></div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- ===================== BOTTOM OS STATUS BAR ===================== -->
     <footer class="footer">
-        <span>TC Analyzer — browser playground &amp; Big O engine.</span>
-        <span class="footer-dot">·</span>
-        <span>JS &amp; Python run locally · compiled languages via remote sandbox.</span>
+        <div class="footer-left">
+            <span class="footer-led" aria-hidden="true"></span>
+            <span>JS &amp; Python run locally · compiled languages via remote sandbox</span>
+        </div>
+        <span>TC Analyzer, browser playground and Big O engine.</span>
     </footer>
 
     <div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="false"></div>

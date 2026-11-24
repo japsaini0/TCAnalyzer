@@ -82,8 +82,12 @@
     const historyGrid = $('#historyGrid');
     const clearHistoryBtn = $('#clearHistoryBtn');
     const examplesGrid = $('#examplesGrid');
+    const examplesPreviewBody = $('#examplesPreviewBody');
     const learnGrid = $('#learnGrid');
     const chartLegend = $('#chartLegend');
+    const playgroundLegend = $('#playgroundLegend');
+    const openExamplesBtn = $('#openExamplesBtn');
+    const openGuideBtn = $('#openGuideBtn');
 
     const terminalOutput = $('#terminalOutput');
     const stdinInput = $('#stdinInput');
@@ -106,6 +110,7 @@
     if (!Array.isArray(history)) history = [];
 
     let lastMetrics = null;
+    let lastNotation = null;
     let isRunning = false;
     let runSeq = 0;
     let undoBuffer = null;
@@ -120,11 +125,12 @@
         const next = theme === 'dark' ? 'dark' : 'light';
         document.documentElement.setAttribute('data-theme', next);
         const meta = document.querySelector('meta[name="theme-color"]');
-        if (meta) meta.setAttribute('content', next === 'dark' ? '#15181e' : '#ffffff');
+        if (meta) meta.setAttribute('content', next === 'dark' ? '#1e7874' : '#5d858e');
         themeToggle.setAttribute('aria-pressed', String(next === 'dark'));
         themeToggle.setAttribute('aria-label', next === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
         store.set('tc_theme', next);
         if ($('#tab-learn').classList.contains('is-active')) drawChart();
+        if ($('#tab-analyzer').classList.contains('is-active')) drawPlaygroundChart(lastNotation);
     }
 
     applyTheme(store.get('tc_theme', 'dark'));
@@ -185,26 +191,54 @@
     }
 
     /* ================================================================
-       Tabs
+       Tabs & Desktop Navigation
        ================================================================ */
 
+    function switchTab(name) {
+        $$('.tab-btn').forEach((b) => {
+            const on = b.dataset.tab === name;
+            b.classList.toggle('is-active', on);
+            b.setAttribute('aria-selected', String(on));
+        });
+
+        $$('.tab-panel').forEach((p) => p.classList.toggle('is-active', p.id === `tab-${name}`));
+
+        if (name === 'learn') {
+            requestAnimationFrame(drawChart);
+        } else if (name === 'analyzer') {
+            requestAnimationFrame(() => drawPlaygroundChart(lastNotation));
+        }
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
     $$('.tab-btn').forEach((btn) => {
-        btn.addEventListener('click', () => {
-            $$('.tab-btn').forEach((b) => {
-                b.classList.remove('is-active');
-                b.setAttribute('aria-selected', 'false');
-            });
-            btn.classList.add('is-active');
-            btn.setAttribute('aria-selected', 'true');
+        btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+    });
 
-            $$('.tab-panel').forEach((p) => p.classList.remove('is-active'));
-            const panel = $(`#tab-${btn.dataset.tab}`);
-            if (panel) panel.classList.add('is-active');
+    if (openExamplesBtn) openExamplesBtn.addEventListener('click', () => switchTab('examples'));
+    if (openGuideBtn) openGuideBtn.addEventListener('click', () => switchTab('learn'));
 
-            if (btn.dataset.tab === 'learn') {
-                requestAnimationFrame(drawChart);
+    $$('.desk-icon').forEach((iconBtn) => {
+        iconBtn.addEventListener('click', () => {
+            const action = iconBtn.dataset.deskAction;
+            if (action === 'playground') {
+                switchTab('analyzer');
+                codeInput.focus();
+            } else if (action === 'projects') {
+                if (history.length) {
+                    switchTab('analyzer');
+                    requestAnimationFrame(() => historySection.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+                } else {
+                    switchTab('examples');
+                }
+            } else if (action === 'docs') {
+                switchTab('learn');
+            } else if (action === 'examples') {
+                switchTab('examples');
+            } else if (action === 'clear') {
+                switchTab('analyzer');
+                clearBtn.click();
             }
-            window.scrollTo({ top: 0, behavior: 'smooth' });
         });
     });
 
@@ -536,16 +570,73 @@
         });
     }
 
-    function resetResults() {
-        resultsBody.innerHTML = `
-            <div class="empty">
-                <div class="empty-glyph" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/></svg>
-                </div>
-                <h2>Nothing to analyse</h2>
-                <p>Write some code on the left, or load an example from the Examples tab.</p>
+    function folderTabsHtml(activeKey = 'stats') {
+        const folderSvg = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" shape-rendering="crispEdges"><path d="M1 3h5l2 2h7v8H1z" fill="#e8ba36" stroke="#181c24" stroke-width="1"/></svg>';
+        return `
+            <div class="folder-tabs" aria-label="Complexity sections">
+                <button type="button" class="folder-tab${activeKey === 'stats' ? ' is-active' : ''}" data-result-focus="stats">${folderSvg}<span>Time &amp; Space</span></button>
+                <button type="button" class="folder-tab${activeKey === 'bench' ? ' is-active' : ''}" data-result-focus="bench">${folderSvg}<span>Benchmarks</span></button>
+                <button type="button" class="folder-tab${activeKey === 'tips' ? ' is-active' : ''}" data-result-focus="tips">${folderSvg}<span>Optimisation Tips</span></button>
             </div>`;
+    }
+
+    function wireFolderTabs() {
+        resultsBody.querySelectorAll('.folder-tab').forEach((tab) => {
+            tab.addEventListener('click', () => {
+                resultsBody.querySelectorAll('.folder-tab').forEach((t) => t.classList.remove('is-active'));
+                tab.classList.add('is-active');
+                const key = tab.dataset.resultFocus;
+                const target = key === 'bench'
+                    ? resultsBody.querySelector('.bench')
+                    : key === 'tips'
+                        ? resultsBody.querySelector('[data-section="tips"]')
+                        : resultsBody.querySelector('.stat-grid');
+                if (target) {
+                    target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                } else if (key === 'bench') {
+                    toast('Run the code to record execution benchmarks');
+                }
+            });
+        });
+    }
+
+    function complexityMeterSteps(notation) {
+        const s = String(notation || '').toLowerCase();
+        if (s.includes('2^n') || s.includes('n!')) return 15;
+        if (s.includes('n³') || s.includes('n^3')) return 14;
+        if (s.includes('n²') || s.includes('n^2')) return 12;
+        if (s.includes('n log n')) return 10;
+        if (s.includes('v + e')) return 8;
+        if (s === 'o(n)' || s.includes('o(n)')) return 7;
+        if (s.includes('log n')) return 4;
+        if (s.includes('o(1)')) return 2;
+        return 6;
+    }
+
+    function meterHtml(litCount) {
+        let cells = '';
+        for (let i = 0; i < 15; i += 1) {
+            cells += `<span class="meter-seg${i < litCount ? ' is-on' : ''}"></span>`;
+        }
+        return `<div class="complexity-meter" aria-hidden="true">${cells}</div>`;
+    }
+
+    function resetResults() {
+        lastNotation = null;
+        resultsBody.innerHTML = `
+            <div class="result-hero">
+                <div class="result-hero-label">Time complexity</div>
+                <div class="result-hero-value">O(?)</div>
+                <div class="result-space-line">Space Complexity: <strong>pending</strong></div>
+                ${meterHtml(0)}
+            </div>
+            ${folderTabsHtml('stats')}
+            <div class="empty-hint">
+                Write some code on the left, or load an example from the Examples table.
+            </div>`;
+        wireFolderTabs();
         copyResultBtn.hidden = true;
+        drawPlaygroundChart(null);
     }
 
     function analyse(options = {}) {
@@ -694,18 +785,21 @@
         if (!result) return;
 
         if (result.error) {
+            lastNotation = null;
             resultsBody.innerHTML = `
                 <div class="result-error">
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4.5M12 16h.01"/></svg>
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4.5M12 16h.01"/></svg>
                     <div><strong>Can't analyse this</strong><p>${esc(result.error)}</p></div>
                 </div>`;
             copyResultBtn.hidden = true;
+            drawPlaygroundChart(null);
             return;
         }
 
         const r = result;
+        lastNotation = r.timeComplexity;
         const bench = metrics ? `
-            <div class="bench">
+            <div class="bench" data-section="bench">
                 <span class="bench-title">
                     <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="M13 2 4 14h6l-1 8 10-12h-6z"/></svg>
                     Last run
@@ -732,11 +826,11 @@
             </section>` : '';
 
         const tips = (r.optimizations || []).length ? `
-            <section class="block">
+            <section class="block" data-section="tips">
                 <h3 class="block-title">Optimisation</h3>
                 ${r.optimizations.map((t) => `
                     <div class="tip">
-                        <svg class="tip-glyph" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V18h8v-3.3A7 7 0 0 0 12 2z"/></svg>
+                        <svg class="tip-glyph" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V18h8v-3.3A7 7 0 0 0 12 2z"/></svg>
                         <span>${esc(t)}</span>
                     </div>`).join('')}
             </section>` : '';
@@ -745,12 +839,16 @@
             <div class="result-hero">
                 <div class="result-hero-label">Time complexity</div>
                 <div class="result-hero-value">${esc(r.timeComplexity)}</div>
+                <div class="result-space-line">Space Complexity: <strong>${esc(r.spaceComplexity)}</strong></div>
+                ${meterHtml(complexityMeterSteps(r.timeComplexity))}
                 <div class="result-hero-badges">
                     <span class="badge ${ratingClass(r.rating.label)}">${esc(r.rating.label)}</span>
                     <span class="badge accent">${esc(String(r.language).toUpperCase())}</span>
                     ${r.isUncertain ? '<span class="badge warn">uncertain</span>' : ''}
                 </div>
             </div>
+
+            ${folderTabsHtml('stats')}
 
             <div class="stat-grid">
                 <div class="stat"><div class="stat-label">Best</div><div class="stat-value">${esc(r.bestCase)}</div></div>
@@ -765,7 +863,9 @@
             ${tips}
         `;
 
+        wireFolderTabs();
         copyResultBtn.hidden = false;
+        drawPlaygroundChart(r.timeComplexity);
     }
 
     /* ================================================================
@@ -1089,7 +1189,7 @@ int main() {
 
     function renderExamples() {
         examplesGrid.innerHTML = EXAMPLES.map((ex, i) => `
-            <button class="example-card" data-index="${i}" aria-label="Load ${esc(ex.name)} example">
+            <button type="button" class="example-card" data-index="${i}" aria-label="Load ${esc(ex.name)} example">
                 <div class="example-head">
                     <span class="example-name">${esc(ex.name)}</span>
                     <span class="badge accent">${esc(ex.complexity)}</span>
@@ -1103,14 +1203,45 @@ int main() {
             card.addEventListener('click', () => {
                 const ex = EXAMPLES[Number(card.dataset.index)];
                 if (!ex) return;
-                $$('.tab-btn').forEach((b) => {
-                    const on = b.dataset.tab === 'analyzer';
-                    b.classList.toggle('is-active', on);
-                    b.setAttribute('aria-selected', String(on));
-                });
-                $$('.tab-panel').forEach((p) => p.classList.toggle('is-active', p.id === 'tab-analyzer'));
+                switchTab('analyzer');
                 loadCode(ex.code, ex.lang, `${ex.name} loaded — press Run`);
                 codeInput.focus();
+            });
+        });
+    }
+
+    function renderExamplesPreview() {
+        if (!examplesPreviewBody) return;
+        const langLabel = (lang) => {
+            if (lang === 'cpp') return 'C++';
+            if (lang === 'javascript') return 'JavaScript';
+            if (lang === 'python') return 'Python';
+            if (lang === 'java') return 'Java';
+            return String(lang || '').toUpperCase();
+        };
+        const docSvg = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" shape-rendering="crispEdges"><path d="M3 2h7l3 3v9H3z" fill="#f3efe4" stroke="#181c24" stroke-width="1"/><path d="M5 7h6M5 10h6" stroke="#181c24" stroke-width="1"/></svg>';
+        examplesPreviewBody.innerHTML = EXAMPLES.map((ex, i) => `
+            <tr data-index="${i}" tabindex="0" role="button" aria-label="Load ${esc(ex.name)} (${esc(ex.complexity)})">
+                <td><span class="os-table-name">${docSvg}<span>${esc(ex.name)}</span></span></td>
+                <td>${esc(langLabel(ex.lang))}</td>
+                <td>${esc(ex.complexity)}</td>
+            </tr>
+        `).join('');
+
+        const activateRow = (row) => {
+            const ex = EXAMPLES[Number(row.dataset.index)];
+            if (!ex) return;
+            loadCode(ex.code, ex.lang, `${ex.name} loaded — press Run`);
+            codeInput.focus();
+        };
+
+        examplesPreviewBody.querySelectorAll('tr').forEach((row) => {
+            row.addEventListener('click', () => activateRow(row));
+            row.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    activateRow(row);
+                }
             });
         });
     }
@@ -1120,31 +1251,38 @@ int main() {
        ================================================================ */
 
     const COMPLEXITIES = [
-        { notation: 'O(1)', name: 'Constant', color: '#0f9d8f', desc: 'Independent of input size. Array index, hash lookup.', example: 'arr[i] · dict[key] · x + y' },
-        { notation: 'O(log n)', name: 'Logarithmic', color: '#3aa675', desc: 'Halves the problem each step. Binary search, balanced trees.', example: 'binary search · BST lookup' },
-        { notation: 'O(n)', name: 'Linear', color: '#4f8ddb', desc: 'One pass over the input. Linear search, single loop.', example: 'for x in arr: visit(x)' },
-        { notation: 'O(n log n)', name: 'Linearithmic', color: '#c08a2e', desc: 'Efficient comparison sorts and divide-and-conquer.', example: 'merge sort · heap sort · sorted()' },
-        { notation: 'O(n²)', name: 'Quadratic', color: '#d2703a', desc: 'Nested loops over the same input. Bubble/insertion sort.', example: 'for i: for j: compare' },
-        { notation: 'O(2^n)', name: 'Exponential', color: '#c94f45', desc: 'Doubles with each extra element. Naive recursion, subsets.', example: 'naive fibonacci · power set' },
-        { notation: 'O(n!)', name: 'Factorial', color: '#a34e8f', desc: 'Every ordering. Impractical past n ≈ 12.', example: 'permutations · TSP brute force' },
+        { notation: 'O(1)', name: 'Constant', token: '--color-curve-1', desc: 'Independent of input size. Array index, hash lookup.', example: 'arr[i] · dict[key] · x + y' },
+        { notation: 'O(log n)', name: 'Logarithmic', token: '--color-curve-log', desc: 'Halves the problem each step. Binary search, balanced trees.', example: 'binary search · BST lookup' },
+        { notation: 'O(n)', name: 'Linear', token: '--color-curve-n', desc: 'One pass over the input. Linear search, single loop.', example: 'for x in arr: visit(x)' },
+        { notation: 'O(n log n)', name: 'Linearithmic', token: '--color-curve-nlogn', desc: 'Efficient comparison sorts and divide-and-conquer.', example: 'merge sort · heap sort · sorted()' },
+        { notation: 'O(n²)', name: 'Quadratic', token: '--color-curve-n2', desc: 'Nested loops over the same input. Bubble/insertion sort.', example: 'for i: for j: compare' },
+        { notation: 'O(2^n)', name: 'Exponential', token: '--color-curve-exp', desc: 'Doubles with each extra element. Naive recursion, subsets.', example: 'naive fibonacci · power set' },
+        { notation: 'O(n!)', name: 'Factorial', token: '--color-curve-fact', desc: 'Every ordering. Impractical past n ≈ 12.', example: 'permutations · TSP brute force' },
     ];
 
+    function tokenVal(css, name, fallback) {
+        return (css.getPropertyValue(name) || '').trim() || fallback;
+    }
+
     function renderLearn() {
-        learnGrid.innerHTML = COMPLEXITIES.map((c) => `
-            <article class="learn-card" style="--c:${c.color}">
+        const css = getComputedStyle(document.documentElement);
+        learnGrid.innerHTML = COMPLEXITIES.map((c) => {
+            const col = `var(${c.token})`;
+            return `
+            <article class="learn-card" style="--c:${col}">
                 <div class="learn-head">
                     <span class="learn-notation">${esc(c.notation)}</span>
                     <span class="learn-name">${esc(c.name)}</span>
                 </div>
                 <p class="learn-desc">${esc(c.desc)}</p>
                 <code class="learn-ex">${esc(c.example)}</code>
-            </article>
-        `).join('');
+            </article>`;
+        }).join('');
 
         if (chartLegend) {
-            chartLegend.innerHTML = COMPLEXITIES.slice(0, 5).map((c) => `
+            chartLegend.innerHTML = COMPLEXITIES.slice(0, 6).map((c) => `
                 <span class="chart-legend-item">
-                    <span class="chart-legend-swatch" style="background:${c.color}"></span>${esc(c.notation)}
+                    <span class="chart-legend-swatch" style="background:${esc(tokenVal(css, c.token, '#ffffff'))}"></span>${esc(c.notation)}
                 </span>`).join('');
         }
     }
@@ -1155,7 +1293,7 @@ int main() {
 
         const box = canvas.parentElement.getBoundingClientRect();
         const W = Math.max(280, Math.floor(box.width));
-        const H = 320;
+        const H = 300;
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
         canvas.width = Math.floor(W * dpr);
@@ -1168,9 +1306,9 @@ int main() {
         ctx.clearRect(0, 0, W, H);
 
         const css = getComputedStyle(document.documentElement);
-        const gridColor = css.getPropertyValue('--border').trim() || '#e2e5ea';
-        const axisColor = css.getPropertyValue('--text-3').trim() || '#6b7280';
-        const textColor = css.getPropertyValue('--text-2').trim() || '#4d5562';
+        const gridColor = tokenVal(css, '--color-crt-rule', '#2b323e');
+        const axisColor = tokenVal(css, '--color-crt-muted', '#8e98a8');
+        const textColor = tokenVal(css, '--color-crt-ink', '#ebe8df');
 
         const padL = 46, padR = 16, padT = 14, padB = 34;
         const plotW = Math.max(40, W - padL - padR);
@@ -1179,10 +1317,9 @@ int main() {
         const maxN = 24;
         const maxOps = 120;
 
-        // grid
         ctx.strokeStyle = gridColor;
         ctx.lineWidth = 1;
-        ctx.font = '11px Inter, system-ui, sans-serif';
+        ctx.font = '11px "JetBrains Mono", monospace';
         ctx.fillStyle = axisColor;
         ctx.textAlign = 'right';
 
@@ -1202,20 +1339,21 @@ int main() {
         }
 
         ctx.textAlign = 'center';
+        ctx.fillStyle = textColor;
         ctx.fillText('input size (n)', padL + plotW / 2, H - 4);
 
-        // curves
         const curves = [
-            { label: 'O(1)', color: '#0f9d8f', fn: () => 1 },
-            { label: 'O(log n)', color: '#3aa675', fn: (n) => Math.log2(Math.max(1, n)) },
-            { label: 'O(n)', color: '#4f8ddb', fn: (n) => n },
-            { label: 'O(n log n)', color: '#c08a2e', fn: (n) => n * Math.log2(Math.max(1, n)) },
-            { label: 'O(n²)', color: '#d2703a', fn: (n) => n * n },
+            { token: '--color-curve-1', fn: () => 1 },
+            { token: '--color-curve-log', fn: (n) => Math.log2(Math.max(1, n)) },
+            { token: '--color-curve-n', fn: (n) => n },
+            { token: '--color-curve-nlogn', fn: (n) => n * Math.log2(Math.max(1, n)) },
+            { token: '--color-curve-n2', fn: (n) => n * n },
+            { token: '--color-curve-exp', fn: (n) => Math.pow(2, n) },
         ];
 
-        curves.forEach(({ color, fn }) => {
-            ctx.strokeStyle = color;
-            ctx.lineWidth = 2;
+        curves.forEach(({ token, fn }) => {
+            ctx.strokeStyle = tokenVal(css, token, '#e88618');
+            ctx.lineWidth = 2.5;
             ctx.lineJoin = 'round';
             ctx.beginPath();
 
@@ -1230,7 +1368,6 @@ int main() {
             ctx.stroke();
         });
 
-        // axis lines
         ctx.strokeStyle = axisColor;
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -1238,15 +1375,136 @@ int main() {
         ctx.lineTo(padL + 0.5, padT + plotH + 0.5);
         ctx.lineTo(padL + plotW, padT + plotH + 0.5);
         ctx.stroke();
-
-        // x-axis label colour handled above
-        ctx.fillStyle = textColor;
     }
 
-    const redrawChart = debounce(drawChart, 120);
-    window.addEventListener('resize', () => {
-        if ($('#tab-learn').classList.contains('is-active')) redrawChart();
-    });
+    function notationMatches(curveNotation, active) {
+        if (!active) return false;
+        const a = String(active).toLowerCase().replace(/\s+/g, '');
+        const c = String(curveNotation).toLowerCase().replace(/\s+/g, '');
+        if (a === c) return true;
+        if (c === 'o(n²)' && a.includes('n^2')) return true;
+        if (c === 'o(n)' && a === 'o(v+e)') return true;
+        return false;
+    }
+
+    function drawPlaygroundChart(activeNotation) {
+        const canvas = $('#playgroundChart');
+        if (!canvas || !canvas.parentElement) return;
+
+        const css = getComputedStyle(document.documentElement);
+        const curves = [
+            { notation: 'O(2^n)', token: '--color-curve-exp', fn: (n) => Math.pow(2, Math.min(28, n)) },
+            { notation: 'O(n²)', token: '--color-curve-n2', fn: (n) => n * n },
+            { notation: 'O(n log n)', token: '--color-curve-nlogn', fn: (n) => n * Math.log2(Math.max(1, n)) },
+            { notation: 'O(n)', token: '--color-curve-n', fn: (n) => n },
+            { notation: 'O(log n)', token: '--color-curve-log', fn: (n) => Math.log2(Math.max(1, n)) },
+            { notation: 'O(1)', token: '--color-curve-1', fn: () => 1 },
+        ];
+
+        if (playgroundLegend) {
+            playgroundLegend.innerHTML = curves.map((c) => {
+                const col = tokenVal(css, c.token, '#ffffff');
+                const active = notationMatches(c.notation, activeNotation);
+                return `<span class="crt-legend-item${active ? ' is-active' : ''}">
+                    <span class="crt-legend-swatch" style="background:${esc(col)}"></span>${esc(c.notation)}
+                </span>`;
+            }).join('');
+        }
+
+        const box = canvas.parentElement.getBoundingClientRect();
+        const W = Math.max(220, Math.floor(box.width));
+        const H = 200;
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+        canvas.width = Math.floor(W * dpr);
+        canvas.height = Math.floor(H * dpr);
+        canvas.style.width = '100%';
+        canvas.style.height = H + 'px';
+
+        const ctx = canvas.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, W, H);
+
+        const gridColor = tokenVal(css, '--color-crt-rule', '#2b323e');
+        const axisColor = tokenVal(css, '--color-crt-muted', '#8e98a8');
+        const textColor = tokenVal(css, '--color-crt-ink', '#ebe8df');
+
+        const padL = 38, padR = 12, padT = 12, padB = 28;
+        const plotW = Math.max(40, W - padL - padR);
+        const plotH = H - padT - padB;
+
+        const yTicks = ['10⁰', '10²', '10⁴', '10⁶', '10⁸'];
+        ctx.strokeStyle = gridColor;
+        ctx.lineWidth = 1;
+        ctx.font = '11px "JetBrains Mono", monospace';
+        ctx.fillStyle = axisColor;
+        ctx.textAlign = 'right';
+
+        for (let i = 0; i < yTicks.length; i++) {
+            const y = padT + plotH - (i / 4) * plotH;
+            ctx.beginPath();
+            ctx.moveTo(padL, y + 0.5);
+            ctx.lineTo(padL + plotW, y + 0.5);
+            ctx.stroke();
+            ctx.fillText(yTicks[i], padL - 6, y + 4);
+        }
+
+        const xTicks = [
+            { label: '10⁰', frac: 0 },
+            { label: '10²', frac: 0.33 },
+            { label: '10⁴', frac: 0.66 },
+            { label: '10⁶', frac: 0.96 },
+        ];
+        ctx.textAlign = 'center';
+        for (let i = 0; i < xTicks.length; i++) {
+            const x = padL + xTicks[i].frac * plotW;
+            ctx.beginPath();
+            ctx.moveTo(x + 0.5, padT);
+            ctx.lineTo(x + 0.5, padT + plotH);
+            ctx.stroke();
+            ctx.fillText(xTicks[i].label, x, padT + plotH + 16);
+        }
+        ctx.textAlign = 'right';
+        ctx.fillStyle = textColor;
+        ctx.fillText('n ->', padL + plotW, H - 4);
+
+        const maxExp = 8;
+        curves.forEach(({ notation, token, fn }) => {
+            const active = notationMatches(notation, activeNotation);
+            ctx.strokeStyle = tokenVal(css, token, '#e88618');
+            ctx.lineWidth = active ? 3.5 : 2;
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+
+            let started = false;
+            const steps = 80;
+            for (let s = 0; s <= steps; s++) {
+                const frac = s / steps;
+                const n = Math.pow(10, frac * 4);
+                const ops = Math.max(1, fn(n));
+                const logOps = Math.log10(ops);
+                if (logOps > maxExp) break;
+                const x = padL + frac * plotW;
+                const y = padT + plotH - (logOps / maxExp) * plotH;
+                if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        });
+
+        ctx.strokeStyle = axisColor;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(padL + 0.5, padT);
+        ctx.lineTo(padL + 0.5, padT + plotH + 0.5);
+        ctx.lineTo(padL + plotW, padT + plotH + 0.5);
+        ctx.stroke();
+    }
+
+    const redrawChart = debounce(() => {
+        if ($('#tab-learn').classList.contains('is-active')) drawChart();
+        if ($('#tab-analyzer').classList.contains('is-active')) drawPlaygroundChart(lastNotation);
+    }, 120);
+    window.addEventListener('resize', redrawChart);
 
     /* ================================================================
        Boot
@@ -1264,10 +1522,14 @@ int main() {
         queryCount.textContent = totalRuns;
         renderHistory();
         renderExamples();
+        renderExamplesPreview();
         renderLearn();
 
         if (codeInput.value.trim() && liveToggle.checked) {
             analyse({ silent: true });
+        } else {
+            wireFolderTabs();
+            drawPlaygroundChart(null);
         }
     }
 
