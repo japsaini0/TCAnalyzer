@@ -480,6 +480,17 @@
                 updateMeta();
                 saveDraft();
                 if (liveToggle.checked) scheduleLive();
+                return;
+            }
+
+            /* preserve current indentation on plain Enter */
+            if (indent) {
+                e.preventDefault();
+                codeInput.setRangeText('\n' + indent, start, end, 'end');
+                codeInput.selectionStart = codeInput.selectionEnd = start + 1 + indent.length;
+                updateMeta();
+                saveDraft();
+                if (liveToggle.checked) scheduleLive();
             }
         }
     });
