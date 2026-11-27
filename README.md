@@ -1,6 +1,6 @@
 # TC Analyzer
 
-Paste code, get its time and space complexity, and run it — all in the browser.
+Paste code, get its time and space complexity, and run it — all inside a retro 1995 desktop OS interface in the browser.
 
 **Live site:** https://www.tcanalyzer.tech/
 
@@ -8,13 +8,29 @@ Paste code, get its time and space complexity, and run it — all in the browser
 
 ## What it does
 
-- **Estimates Big-O** from source code: time complexity (best, average and worst case) and auxiliary space, with a short explanation and optimisation hints.
-- **Runs the code** and shows output, exit status and runtime in a docked console, with a Stdin tab for input.
-- **Keeps a history** of your last 15 analyses and restores your draft on reload.
-- **Examples** tab with ready-made snippets, and a **Big O Guide** tab with a growth chart.
-- Dark theme by default, with a light theme behind the toggle. Works down to 390px wide.
+- **Retro desktop workspace:** Styled like a classic 1995 OS with beveled window frames (`CODE.EXE`, `COMPLEXITY.EXE`, `OUTPUT`, `EXAMPLES`, `BIG-O.GRAPH`), navy title bars, an LCD-style run counter in the top taskbar, and a left desktop icon rail (`My Computer`, `Projects`, `Docs`, `Internet`, `Recycle Bin`).
+- **Smart code editor (`CODE.EXE`):** Synced line-number gutter, character/line counter, **Live Big O** toggle, starter templates, bracket/quote auto-closing and selection wrapping, `Tab` / `Shift+Tab` block indentation, and smart `Enter` auto-indentation.
+- **Big-O complexity readout (`COMPLEXITY.EXE`):** CRT readout with a 15-segment complexity meter, rating and language badges, quick-jump folder tabs (**Time & Space**, **Benchmarks**, **Optimisation Tips**), best/average/worst/space breakdown, last-run benchmark strip, assumptions, explanation, and optimisation hints.
+- **Docked console (`OUTPUT`):** Executes code and displays output, exit code, and runtime in milliseconds, with a **Stdin** tab for program input.
+- **Live growth graph & quick examples:** On the Playground tab, **EXAMPLES** lets you load any starter algorithm in one click while **BIG-O.GRAPH** plots common Big-O curves on a log scale and highlights the detected complexity.
+- **Full Examples & Big O Guide tabs:** Dedicated **Examples** (`EXAMPLES.EXE`) gallery with 9 runnable C++ algorithm starters and a **Big O Guide** tab with an interactive growth-rate chart (`O(1)` to `O(2^n)`) and reference cards (`O(1)` to `O(n!)`).
+- **History & draft persistence:** **RECENT RUNS** stores up to 15 analyses with complexity, snippet preview, language, runtime, and timestamp; your draft (`code`, `language`, `stdin`) is restored on reload.
+- **Dark CRT & light themes:** Opens in the default dark CRT + teal desktop theme, with a light theme behind the top-right toggle. Responsive down to 390px wide and respects `prefers-reduced-motion`.
 
-The analysis is static pattern-based estimation, not a proof. When the engine has to guess, it marks the result as uncertain and lists the assumptions it made.
+The analysis is static pattern-based estimation, not a proof. When the engine has to guess, it marks the result as `uncertain` and lists the assumptions it made.
+
+<details>
+<summary>More screenshots (light theme, Examples, Big O Guide, mobile)</summary>
+
+| Light theme | Examples (`EXAMPLES.EXE`) |
+|---|---|
+| ![TC Analyzer light theme](screenshots/02-playground-light.png) | ![TC Analyzer examples tab](screenshots/03-examples-dark.png) |
+
+| Big O Guide | Mobile (390px) |
+|---|---|
+| ![TC Analyzer Big O Guide](screenshots/04-guide-dark.png) | ![TC Analyzer mobile view](screenshots/06-mobile-dark.png) |
+
+</details>
 
 ## Supported languages
 
@@ -37,11 +53,12 @@ Local runs (JavaScript, Python) are stopped after 5 seconds, so an infinite loop
 
 | Keys | Action |
 |---|---|
-| `Ctrl`/`Cmd` + `Enter` | Analyse |
+| `Ctrl`/`Cmd` + `Enter` | Analyse complexity |
 | `Shift` + `Enter` | Run |
 | `Ctrl`/`Cmd` + `Shift` + `Enter` | Run and analyse |
 | `Esc` | Cancel a run in progress |
-| `Ctrl`/`Cmd` + `Z` | Undo a template or example replacing your code |
+| `Ctrl`/`Cmd` + `Z` | Undo a template, example, history load, or Clear replacing your code |
+| `Tab` / `Shift` + `Tab` | Indent or unindent the current line / selection (4 spaces) |
 
 ## Run it locally
 
@@ -75,16 +92,18 @@ This runs 43 regression checks against the analysis engine and needs no browser.
 
 | File | Purpose |
 |---|---|
-| `index.html` | Page markup |
-| `styles.css` | Design tokens, light and dark themes, responsive layout |
-| `app.js` | UI: tabs, theme, editor, history, examples, guide |
+| `index.html` | Page markup for the retro OS desktop shell, tabs, and panes |
+| `tokens.css` | Design tokens, typography (`Besley`, `IBM Plex Sans`, `VT323`, `JetBrains Mono`), and dark/light palettes |
+| `base.css` | Reset, typography defaults, accessibility helpers, and `prefers-reduced-motion` |
+| `styles.css` | Retro 3D bevel primitives, CRT panels, window chrome, and responsive layout |
+| `app.js` | UI: tabs, desktop shortcuts, theme, smart editor, history, examples, guide charts |
 | `analyzer.js` | The Big-O engine (`new ComplexityAnalyzer().analyze(code, lang)`) |
 | `runner.js` | Code execution: workers, Pyodide, Wandbox |
 | `serve.js` | Optional local server with native compilers |
 | `test_regression.js` | Engine regression suite |
 | `vercel.json` | Vercel config: CSP, security headers, caching |
-| `CHANGES.md` | Changelog of the redesign and bug fixes |
-| `screenshots/` | Screenshots of the current design |
+| `CHANGES.md` | Changelog of previous rebuild and engine/runner bug fixes |
+| `screenshots/` | Screenshots of the current retro desktop UI |
 
 ## Deployment
 
@@ -92,4 +111,4 @@ The site is a set of static files configured for Vercel through `vercel.json`. A
 
 ## Privacy
 
-Theme, draft, run count and history are stored in your browser's local storage. Code is only sent off your machine when you run a compiled language, in which case it goes to Wandbox.
+Theme, draft (`code`, `language`, `stdin`), run count and history are stored in your browser's local storage. Code is only sent off your machine when you run a compiled language, in which case it goes to Wandbox.
